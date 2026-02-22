@@ -1,0 +1,1247 @@
+pcall(function()
+    for _, v in ipairs(game.CoreGui:GetChildren()) do
+        if v.Name == "SchmecktPvP" then v:Destroy() end
+    end
+end)
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local HttpService = game:GetService("HttpService")
+local LocalPlayer = Players.LocalPlayer
+
+local SaveFileName = "SchmecktPvP_Settings.json"
+
+local AllConnections = {}
+
+local function TrackConnection(conn)
+    table.insert(AllConnections, conn)
+    return conn
+end
+
+local function CleanupAllConnections()
+    for _, conn in ipairs(AllConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    AllConnections = {}
+end
+
+local function LoadSettings()
+    local success, result = pcall(function()
+        if readfile then
+            local data = readfile(SaveFileName)
+            return HttpService:JSONDecode(data)
+        end
+    end)
+    if success and result then return result end
+    return {}
+end
+
+local function SaveSettings(settings)
+    pcall(function()
+        if writefile then
+            writefile(SaveFileName, HttpService:JSONEncode(settings))
+        end
+    end)
+end
+
+local SavedSettings = LoadSettings()
+
+local ScaleFactor = 1
+local SelectedVersion = nil
+
+local AutoGrabEnabled = false
+local AutoGrabRange = 5
+local GrabStartTime = 0
+local CurrentGrabPrompt = nil
+
+local WalkFlingRunning = false
+local FlingConnection = nil
+local CollisionConnection = nil
+
+local AntiRagdollActive = false
+local AntiRagdollConnections = {}
+local trackedMotors = {}
+
+local AntiKnockbackActive = false
+local AntiKnockbackConnection = nil
+
+local HitboxConnection = nil
+
+local FloatStealEnabled = false
+local FloatPlatform = nil
+local FloatConnection = nil
+local FloatHeight = 13
+local FloatSpeed = 0.3
+local IsCurrentlyFloating = false
+local FloatStartY = 0
+local SmartFloatRange = 20
+
+local SpeedBoostEnabled = false
+local NormalSpeed = SavedSettings.NormalSpeed or 57
+local StealSpeed = SavedSettings.StealSpeed or 29.5
+
+local AutoBatEnabled = false
+local BatSpamDelay = 0.05
+
+local TweenToBrainrotEnabled = false
+local TweenConnection = nil
+local TweenWalkSpeed = 59
+local TweenCurrentWaypointIndex = 1
+local TweenAllWaypoints = {}
+local TweenArrived = false
+local TweenLastDirection = nil
+local TweenStealPhase = false
+local TweenGrabComplete = false
+
+local STEAL_DISABLE_RANGE = 12
+local EXTRA_DISTANCE = 2.5
+
+local Path1 = {
+    Vector3.new(-475.8, -7.31, 97.53),
+    Vector3.new(-488.04, -5.09, 97.4)
+}
+
+local Path2 = {
+    Vector3.new(-474.15, -7.31, 26.64),
+    Vector3.new(-488.04, -5.31, 26.42)
+}
+
+local SetWalkFling = nil
+local SetTweenToBrainrot = nil
+local SetAutoGrab = nil
+local GetWalkFling = nil
+local GetTweenToBrainrot = nil
+local GetAutoGrabFunc = nil
+local GetFloatSteal = nil
+local GetSpeedBoost = nil
+local GetHitboxExp = nil
+local GetAutoBat = nil
+local GetAntiRagdoll = nil
+local GetAntiKnockback = nil
+local ScreenGui = nil
+local StatusLabel = nil
+local ProgFill = nil
+local ProgPercent = nil
+local SpeedFrame = nil
+local SpeedStatusLabel = nil
+
+local function ShowVersionSelector()
+    local SelectorGui = Instance.new("ScreenGui")
+    SelectorGui.Name = "SchmecktVersionSelector"
+    SelectorGui.ResetOnSpawn = false
+    SelectorGui.Parent = game.CoreGui
+
+    local SelectorFrame = Instance.new("Frame")
+    SelectorFrame.Size = UDim2.new(0, 300, 0, 150)
+    SelectorFrame.Position = UDim2.new(0.5, -150, 0.5, -75)
+    SelectorFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    SelectorFrame.BorderSizePixel = 0
+    SelectorFrame.Parent = SelectorGui
+    Instance.new("UICorner", SelectorFrame).CornerRadius = UDim.new(0, 10)
+    local SelectorStroke = Instance.new("UIStroke", SelectorFrame)
+    SelectorStroke.Color = Color3.fromRGB(138, 43, 226)
+    SelectorStroke.Thickness = 2
+
+    local TitleLabel = Instance.new("TextLabel")
+    TitleLabel.Size = UDim2.new(1, 0, 0, 40)
+    TitleLabel.Position = UDim2.new(0, 0, 0, 10)
+    TitleLabel.BackgroundTransparency = 1
+    TitleLabel.Text = "Select Version"
+    TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TitleLabel.Font = Enum.Font.GothamBold
+    TitleLabel.TextSize = 20
+    TitleLabel.Parent = SelectorFrame
+
+    local PCButton = Instance.new("TextButton")
+    PCButton.Size = UDim2.new(0, 120, 0, 50)
+    PCButton.Position = UDim2.new(0, 25, 0, 70)
+    PCButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    PCButton.Text = "PC Version"
+    PCButton.TextColor3 = Color3.fromRGB(180, 100, 255)
+    PCButton.Font = Enum.Font.GothamBold
+    PCButton.TextSize = 16
+    PCButton.Parent = SelectorFrame
+    Instance.new("UICorner", PCButton).CornerRadius = UDim.new(0, 8)
+    Instance.new("UIStroke", PCButton).Color = Color3.fromRGB(138, 43, 226)
+
+    local MobileButton = Instance.new("TextButton")
+    MobileButton.Size = UDim2.new(0, 120, 0, 50)
+    MobileButton.Position = UDim2.new(0, 155, 0, 70)
+    MobileButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    MobileButton.Text = "Mobile Version"
+    MobileButton.TextColor3 = Color3.fromRGB(180, 100, 255)
+    MobileButton.Font = Enum.Font.GothamBold
+    MobileButton.TextSize = 16
+    MobileButton.Parent = SelectorFrame
+    Instance.new("UICorner", MobileButton).CornerRadius = UDim.new(0, 8)
+    Instance.new("UIStroke", MobileButton).Color = Color3.fromRGB(138, 43, 226)
+
+    local Selected = false
+
+    PCButton.MouseButton1Click:Connect(function()
+        if Selected then return end
+        Selected = true
+        ScaleFactor = 1
+        SelectedVersion = "PC"
+        SelectorGui:Destroy()
+    end)
+
+    MobileButton.MouseButton1Click:Connect(function()
+        if Selected then return end
+        Selected = true
+        ScaleFactor = 1 / 2.3
+        SelectedVersion = "Mobile"
+        SelectorGui:Destroy()
+    end)
+
+    repeat task.wait() until SelectedVersion ~= nil
+end
+
+ShowVersionSelector()
+
+ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "SchmecktPvP"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = game.CoreGui
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 260 * ScaleFactor, 0, 460 * ScaleFactor)
+MainFrame.Position = UDim2.new(1, -280 * ScaleFactor, 0, 120 * ScaleFactor)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8 * ScaleFactor)
+local MainStroke = Instance.new("UIStroke", MainFrame)
+MainStroke.Color = Color3.fromRGB(138, 43, 226)
+MainStroke.Thickness = 2 * ScaleFactor
+
+local TopBar = Instance.new("Frame")
+TopBar.Size = UDim2.new(1, 0, 0, 32 * ScaleFactor)
+TopBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+TopBar.BorderSizePixel = 0
+TopBar.Parent = MainFrame
+Instance.new("UICorner", TopBar).CornerRadius = UDim.new(0, 8 * ScaleFactor)
+Instance.new("UIStroke", TopBar).Color = Color3.fromRGB(138, 43, 226)
+
+local Title = Instance.new("TextLabel")
+Title.Text = "Schmeckt PvP | .gg/schmeckt"
+Title.Font = Enum.Font.GothamBold
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 13 * ScaleFactor
+Title.BackgroundTransparency = 1
+Title.Size = UDim2.new(1, -40 * ScaleFactor, 1, 0)
+Title.Position = UDim2.new(0, 10 * ScaleFactor, 0, 0)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TopBar
+
+local CloseButton = Instance.new("TextButton")
+CloseButton.Text = "X"
+CloseButton.Font = Enum.Font.GothamBold
+CloseButton.TextSize = 16 * ScaleFactor
+CloseButton.TextColor3 = Color3.fromRGB(255, 60, 60)
+CloseButton.BackgroundTransparency = 1
+CloseButton.Size = UDim2.new(0, 30 * ScaleFactor, 0, 30 * ScaleFactor)
+CloseButton.Position = UDim2.new(1, -32 * ScaleFactor, 0, 1 * ScaleFactor)
+CloseButton.Parent = TopBar
+
+local function CreateToggle(parent, text, yPos, settingKey, defaultState)
+    local Container = Instance.new("Frame", parent)
+    Container.Size = UDim2.new(1, -20 * ScaleFactor, 0, 38 * ScaleFactor)
+    Container.Position = UDim2.new(0, 10 * ScaleFactor, 0, yPos * ScaleFactor)
+    Container.BackgroundTransparency = 1
+
+    local Label = Instance.new("TextLabel", Container)
+    Label.Text = text
+    Label.Font = Enum.Font.GothamBold
+    Label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Label.TextSize = 14 * ScaleFactor
+    Label.BackgroundTransparency = 1
+    Label.Size = UDim2.new(1, -60 * ScaleFactor, 1, 0)
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+
+    local SwitchBg = Instance.new("Frame", Container)
+    SwitchBg.Size = UDim2.new(0, 36 * ScaleFactor, 0, 18 * ScaleFactor)
+    SwitchBg.Position = UDim2.new(1, -46 * ScaleFactor, 0.5, -9 * ScaleFactor)
+    SwitchBg.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    Instance.new("UICorner", SwitchBg).CornerRadius = UDim.new(1, 0)
+
+    local Knob = Instance.new("Frame", SwitchBg)
+    Knob.Size = UDim2.new(0, 14 * ScaleFactor, 0, 14 * ScaleFactor)
+    Knob.Position = UDim2.new(0, 2 * ScaleFactor, 0.5, -7 * ScaleFactor)
+    Knob.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
+    Instance.new("UICorner", Knob).CornerRadius = UDim.new(1, 0)
+
+    local Separator = Instance.new("Frame", parent)
+    Separator.Size = UDim2.new(1, -20 * ScaleFactor, 0, 1 * ScaleFactor)
+    Separator.Position = UDim2.new(0, 10 * ScaleFactor, 0, (yPos + 38) * ScaleFactor)
+    Separator.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
+    Instance.new("UIStroke", Separator).Color = Color3.fromRGB(138, 43, 226)
+
+    local toggled = false
+    if settingKey and SavedSettings[settingKey] ~= nil then
+        toggled = SavedSettings[settingKey]
+    elseif defaultState then
+        toggled = defaultState
+    end
+
+    local function updateVisual()
+        if toggled then
+            Knob.Position = UDim2.new(1, -16 * ScaleFactor, 0.5, -7 * ScaleFactor)
+            Knob.BackgroundColor3 = Color3.fromRGB(180, 100, 255)
+            SwitchBg.BackgroundColor3 = Color3.fromRGB(100, 50, 150)
+        else
+            Knob.Position = UDim2.new(0, 2 * ScaleFactor, 0.5, -7 * ScaleFactor)
+            Knob.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
+            SwitchBg.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        end
+    end
+
+    local function setToggle(state)
+        toggled = state
+        updateVisual()
+        if settingKey then
+            SavedSettings[settingKey] = toggled
+            SaveSettings(SavedSettings)
+        end
+    end
+
+    updateVisual()
+
+    SwitchBg.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            setToggle(not toggled)
+        end
+    end)
+
+    return function() return toggled end, setToggle
+end
+
+local GetAntiRagdollFunc, SetAntiRagdoll = CreateToggle(MainFrame, "Anti Ragdoll", 42, "AntiRagdoll", false)
+GetAntiRagdoll = GetAntiRagdollFunc
+local GetAntiKnockbackFunc, SetAntiKnockback = CreateToggle(MainFrame, "Anti Knockback", 82, "AntiKnockback", false)
+GetAntiKnockback = GetAntiKnockbackFunc
+local GetWalkFlingFunc, SetWalkFlingFunc = CreateToggle(MainFrame, "WalkFling [Q]", 122, nil, false)
+GetWalkFling = GetWalkFlingFunc
+SetWalkFling = SetWalkFlingFunc
+local GetAutoGrabFuncTemp, SetAutoGrabFunc = CreateToggle(MainFrame, "Auto Grab", 162, "AutoGrab", false)
+GetAutoGrabFunc = GetAutoGrabFuncTemp
+SetAutoGrab = SetAutoGrabFunc
+local GetFloatStealFunc, SetFloatSteal = CreateToggle(MainFrame, "Smart Float", 202, "SmartFloat", false)
+GetFloatSteal = GetFloatStealFunc
+local GetSpeedBoostFunc, SetSpeedBoost = CreateToggle(MainFrame, "Speed Boost", 242, "SpeedBoost", false)
+GetSpeedBoost = GetSpeedBoostFunc
+local GetHitboxExpFunc, SetHitboxExp = CreateToggle(MainFrame, "Hitbox Expander", 282, "HitboxExpander", false)
+GetHitboxExp = GetHitboxExpFunc
+local GetAutoBatFunc, SetAutoBat = CreateToggle(MainFrame, "Auto Bat", 322, "AutoBat", false)
+GetAutoBat = GetAutoBatFunc
+local GetTweenToBrainrotFunc, SetTweenToBrainrotFunc = CreateToggle(MainFrame, "Tween To Brainrot [R]", 362, nil, false)
+GetTweenToBrainrot = GetTweenToBrainrotFunc
+SetTweenToBrainrot = SetTweenToBrainrotFunc
+
+local KeybindContainer = Instance.new("Frame", MainFrame)
+KeybindContainer.Size = UDim2.new(1, -20 * ScaleFactor, 0, 38 * ScaleFactor)
+KeybindContainer.Position = UDim2.new(0, 10 * ScaleFactor, 0, 402 * ScaleFactor)
+KeybindContainer.BackgroundTransparency = 1
+
+local KeybindLabel = Instance.new("TextLabel", KeybindContainer)
+KeybindLabel.Text = "Fling Keybind"
+KeybindLabel.Font = Enum.Font.GothamBold
+KeybindLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+KeybindLabel.TextSize = 14 * ScaleFactor
+KeybindLabel.BackgroundTransparency = 1
+KeybindLabel.Size = UDim2.new(1, -60 * ScaleFactor, 1, 0)
+KeybindLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local KeybindButton = Instance.new("TextButton", KeybindContainer)
+KeybindButton.Size = UDim2.new(0, 40 * ScaleFactor, 0, 22 * ScaleFactor)
+KeybindButton.Position = UDim2.new(1, -50 * ScaleFactor, 0.5, -11 * ScaleFactor)
+KeybindButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+KeybindButton.Text = "Q"
+KeybindButton.TextColor3 = Color3.fromRGB(180, 100, 255)
+KeybindButton.Font = Enum.Font.GothamBold
+KeybindButton.TextSize = 14 * ScaleFactor
+KeybindButton.AutoButtonColor = false
+Instance.new("UICorner", KeybindButton).CornerRadius = UDim.new(0, 4 * ScaleFactor)
+Instance.new("UIStroke", KeybindButton).Color = Color3.fromRGB(138, 43, 226)
+
+local WalkFlingKeybind = Enum.KeyCode.Q
+local IsListeningForKeybind = false
+
+KeybindButton.MouseButton1Click:Connect(function()
+    IsListeningForKeybind = true
+    KeybindButton.Text = "..."
+    KeybindButton.TextColor3 = Color3.fromRGB(255, 255, 100)
+end)
+
+TrackConnection(UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+    
+    if IsListeningForKeybind then
+        WalkFlingKeybind = input.KeyCode
+        KeybindButton.Text = input.KeyCode.Name
+        KeybindButton.TextColor3 = Color3.fromRGB(180, 100, 255)
+        IsListeningForKeybind = false
+        return
+    end
+    
+    if input.KeyCode == WalkFlingKeybind then
+        SetWalkFling(not GetWalkFling())
+        return
+    end
+    
+    if input.KeyCode == Enum.KeyCode.R then
+        SetTweenToBrainrot(not GetTweenToBrainrot())
+        return
+    end
+end))
+
+local ProgressFrame = Instance.new("Frame")
+ProgressFrame.Size = UDim2.new(0, 280 * ScaleFactor, 0, 28 * ScaleFactor)
+ProgressFrame.Position = UDim2.new(0.5, -140 * ScaleFactor, 0, 14 * ScaleFactor)
+ProgressFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
+ProgressFrame.BackgroundTransparency = 0.15
+ProgressFrame.BorderSizePixel = 0
+ProgressFrame.Parent = ScreenGui
+Instance.new("UICorner", ProgressFrame).CornerRadius = UDim.new(0, 8 * ScaleFactor)
+Instance.new("UIStroke", ProgressFrame).Color = Color3.fromRGB(138, 43, 226)
+
+local ProgLabel = Instance.new("TextLabel")
+ProgLabel.Size = UDim2.new(0, 60 * ScaleFactor, 1, 0)
+ProgLabel.Position = UDim2.new(0, 6 * ScaleFactor, 0, 0)
+ProgLabel.BackgroundTransparency = 1
+ProgLabel.Text = "GRAB"
+ProgLabel.TextColor3 = Color3.fromRGB(200, 120, 255)
+ProgLabel.Font = Enum.Font.GothamBlack
+ProgLabel.TextSize = 11 * ScaleFactor
+ProgLabel.TextXAlignment = Enum.TextXAlignment.Left
+ProgLabel.Parent = ProgressFrame
+
+StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(0, 80 * ScaleFactor, 1, 0)
+StatusLabel.Position = UDim2.new(0, 48 * ScaleFactor, 0, 0)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Text = "Idle"
+StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+StatusLabel.Font = Enum.Font.GothamBold
+StatusLabel.TextSize = 10 * ScaleFactor
+StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+StatusLabel.Parent = ProgressFrame
+
+local ProgBarBg = Instance.new("Frame")
+ProgBarBg.Size = UDim2.new(0.55, 0, 0, 10 * ScaleFactor)
+ProgBarBg.Position = UDim2.new(0.38, 0, 0.5, -5 * ScaleFactor)
+ProgBarBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+ProgBarBg.BorderSizePixel = 0
+ProgBarBg.Parent = ProgressFrame
+Instance.new("UICorner", ProgBarBg).CornerRadius = UDim.new(1, 0)
+Instance.new("UIStroke", ProgBarBg).Color = Color3.fromRGB(60, 60, 60)
+
+ProgFill = Instance.new("Frame")
+ProgFill.Size = UDim2.new(0, 0, 1, 0)
+ProgFill.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
+ProgFill.BorderSizePixel = 0
+ProgFill.Parent = ProgBarBg
+Instance.new("UICorner", ProgFill).CornerRadius = UDim.new(1, 0)
+local FillGradient = Instance.new("UIGradient", ProgFill)
+FillGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(138, 43, 226)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(220, 150, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(138, 43, 226))
+}
+
+ProgPercent = Instance.new("TextLabel")
+ProgPercent.Size = UDim2.new(0, 35 * ScaleFactor, 1, 0)
+ProgPercent.Position = UDim2.new(0.94, -35 * ScaleFactor, 0, 0)
+ProgPercent.BackgroundTransparency = 1
+ProgPercent.Text = "0%"
+ProgPercent.TextColor3 = Color3.fromRGB(255, 255, 255)
+ProgPercent.Font = Enum.Font.GothamBold
+ProgPercent.TextSize = 10 * ScaleFactor
+ProgPercent.TextXAlignment = Enum.TextXAlignment.Right
+ProgPercent.Parent = ProgressFrame
+
+SpeedFrame = Instance.new("Frame")
+SpeedFrame.Size = UDim2.new(0, 200 * ScaleFactor, 0, 70 * ScaleFactor)
+SpeedFrame.Position = UDim2.new(1, -220 * ScaleFactor, 1, -90 * ScaleFactor)
+SpeedFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
+SpeedFrame.BorderSizePixel = 0
+SpeedFrame.Visible = false
+SpeedFrame.Active = true
+SpeedFrame.Draggable = true
+SpeedFrame.Parent = ScreenGui
+Instance.new("UICorner", SpeedFrame).CornerRadius = UDim.new(0, 8 * ScaleFactor)
+Instance.new("UIStroke", SpeedFrame).Color = Color3.fromRGB(138, 43, 226)
+
+local SpeedTitle = Instance.new("TextLabel", SpeedFrame)
+SpeedTitle.Size = UDim2.new(1, 0, 0, 20 * ScaleFactor)
+SpeedTitle.Position = UDim2.new(0, 0, 0, 5 * ScaleFactor)
+SpeedTitle.BackgroundTransparency = 1
+SpeedTitle.Text = "Speed Boost"
+SpeedTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+SpeedTitle.Font = Enum.Font.GothamBold
+SpeedTitle.TextSize = 12 * ScaleFactor
+
+local SpeedNormalLabel = Instance.new("TextLabel", SpeedFrame)
+SpeedNormalLabel.Size = UDim2.new(0, 45 * ScaleFactor, 0, 20 * ScaleFactor)
+SpeedNormalLabel.Position = UDim2.new(0, 10 * ScaleFactor, 0, 28 * ScaleFactor)
+SpeedNormalLabel.BackgroundTransparency = 1
+SpeedNormalLabel.Text = "Normal"
+SpeedNormalLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+SpeedNormalLabel.Font = Enum.Font.Gotham
+SpeedNormalLabel.TextSize = 10 * ScaleFactor
+SpeedNormalLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local SpeedNormalBox = Instance.new("TextBox", SpeedFrame)
+SpeedNormalBox.Size = UDim2.new(0, 40 * ScaleFactor, 0, 18 * ScaleFactor)
+SpeedNormalBox.Position = UDim2.new(0, 55 * ScaleFactor, 0, 29 * ScaleFactor)
+SpeedNormalBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+SpeedNormalBox.Text = tostring(NormalSpeed)
+SpeedNormalBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+SpeedNormalBox.Font = Enum.Font.Gotham
+SpeedNormalBox.TextSize = 11 * ScaleFactor
+SpeedNormalBox.ClearTextOnFocus = false
+Instance.new("UICorner", SpeedNormalBox).CornerRadius = UDim.new(0, 4 * ScaleFactor)
+
+local SpeedStealLabel = Instance.new("TextLabel", SpeedFrame)
+SpeedStealLabel.Size = UDim2.new(0, 30 * ScaleFactor, 0, 20 * ScaleFactor)
+SpeedStealLabel.Position = UDim2.new(0, 105 * ScaleFactor, 0, 28 * ScaleFactor)
+SpeedStealLabel.BackgroundTransparency = 1
+SpeedStealLabel.Text = "Steal"
+SpeedStealLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+SpeedStealLabel.Font = Enum.Font.Gotham
+SpeedStealLabel.TextSize = 10 * ScaleFactor
+SpeedStealLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local SpeedStealBox = Instance.new("TextBox", SpeedFrame)
+SpeedStealBox.Size = UDim2.new(0, 40 * ScaleFactor, 0, 18 * ScaleFactor)
+SpeedStealBox.Position = UDim2.new(0, 140 * ScaleFactor, 0, 29 * ScaleFactor)
+SpeedStealBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+SpeedStealBox.Text = tostring(StealSpeed)
+SpeedStealBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+SpeedStealBox.Font = Enum.Font.Gotham
+SpeedStealBox.TextSize = 11 * ScaleFactor
+SpeedStealBox.ClearTextOnFocus = false
+Instance.new("UICorner", SpeedStealBox).CornerRadius = UDim.new(0, 4 * ScaleFactor)
+
+SpeedStatusLabel = Instance.new("TextLabel", SpeedFrame)
+SpeedStatusLabel.Size = UDim2.new(1, -20 * ScaleFactor, 0, 16 * ScaleFactor)
+SpeedStatusLabel.Position = UDim2.new(0, 10 * ScaleFactor, 0, 50 * ScaleFactor)
+SpeedStatusLabel.BackgroundTransparency = 1
+SpeedStatusLabel.Text = "NORMAL - " .. tostring(NormalSpeed)
+SpeedStatusLabel.TextColor3 = Color3.fromRGB(0, 200, 100)
+SpeedStatusLabel.Font = Enum.Font.GothamBold
+SpeedStatusLabel.TextSize = 10 * ScaleFactor
+SpeedStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+SpeedNormalBox.FocusLost:Connect(function()
+    local num = tonumber(SpeedNormalBox.Text)
+    if num and num > 0 then
+        NormalSpeed = num
+        SavedSettings.NormalSpeed = num
+        SaveSettings(SavedSettings)
+    else
+        SpeedNormalBox.Text = tostring(NormalSpeed)
+    end
+end)
+
+SpeedStealBox.FocusLost:Connect(function()
+    local num = tonumber(SpeedStealBox.Text)
+    if num and num > 0 then
+        StealSpeed = num
+        SavedSettings.StealSpeed = num
+        SaveSettings(SavedSettings)
+    else
+        SpeedStealBox.Text = tostring(StealSpeed)
+    end
+end)
+
+local function KillWalkFling()
+    if FlingConnection then FlingConnection:Disconnect() FlingConnection = nil end
+    if CollisionConnection then CollisionConnection:Disconnect() CollisionConnection = nil end
+    WalkFlingRunning = false
+end
+
+local function StartWalkFling()
+    if WalkFlingRunning then return end
+    local character = LocalPlayer.Character
+    if not character then return end
+    local root = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChild("Humanoid")
+    if not root or not humanoid then return end
+    WalkFlingRunning = true
+
+    CollisionConnection = RunService.Stepped:Connect(function()
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character then
+                for _, part in ipairs(plr.Character:GetChildren()) do
+                    if part:IsA("BasePart") then part.CanCollide = false end
+                end
+            end
+        end
+    end)
+
+    FlingConnection = RunService.Heartbeat:Connect(function()
+        character = LocalPlayer.Character
+        root = character and character:FindFirstChild("HumanoidRootPart")
+        humanoid = character and character:FindFirstChild("Humanoid")
+        if not (character and character.Parent and root and root.Parent and humanoid) then return end
+        local moveDir = humanoid.MoveDirection
+        local currentVel = root.Velocity
+        root.Velocity = Vector3.new(0, 10000, 0)
+        RunService.RenderStepped:Wait()
+        if character and character.Parent and root and root.Parent then
+            if moveDir.Magnitude > 0.1 then
+                root.Velocity = Vector3.new(moveDir.X * 60, currentVel.Y, moveDir.Z * 60)
+            else
+                root.Velocity = Vector3.new(0, currentVel.Y, 0)
+            end
+        end
+    end)
+end
+
+local function EnableAntiRagdoll()
+    if AntiRagdollActive then return end
+    AntiRagdollActive = true
+    local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local humanoid = character:WaitForChild("Humanoid")
+
+    pcall(function()
+        local p = ReplicatedStorage:WaitForChild("Packages", 2)
+        if p then p = p:FindFirstChild("Ragdoll")
+            if p and p:FindFirstChild("Ragdoll") then p = p:FindFirstChild("Ragdoll")
+                if p:IsA("RemoteEvent") then p.FireClient = function() end end
+            end
+        end
+    end)
+
+    local function WatchMotor(motor)
+        if not motor:IsA("Motor6D") or trackedMotors[motor] then return end
+        trackedMotors[motor] = true
+        table.insert(AntiRagdollConnections, motor:GetPropertyChangedSignal("Enabled"):Connect(function()
+            if not motor.Enabled then motor.Enabled = true end
+        end))
+        motor.Enabled = true
+    end
+
+    for _, desc in ipairs(character:GetDescendants()) do WatchMotor(desc) end
+    table.insert(AntiRagdollConnections, character.DescendantAdded:Connect(WatchMotor))
+
+    local function CleanRagdoll()
+        for _, obj in pairs(character:GetDescendants()) do
+            if obj:IsA("BallSocketConstraint") or obj:IsA("NoCollisionConstraint") or obj:IsA("HingeConstraint")
+                or (obj:IsA("Attachment") and (obj.Name == "RagdollAttachment" or obj.Name == "A" or obj.Name == "B")) then
+                obj:Destroy()
+            end
+        end
+    end
+
+    table.insert(AntiRagdollConnections, RunService.Heartbeat:Connect(function()
+        CleanRagdoll()
+        local state = humanoid:GetState()
+        if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll or state == Enum.HumanoidStateType.FallingDown then
+            humanoid:ChangeState(Enum.HumanoidStateType.Running)
+        end
+    end))
+
+    table.insert(AntiRagdollConnections, RunService.RenderStepped:Connect(function()
+        pcall(function()
+            local controls = require(LocalPlayer:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule")):GetControls()
+            if controls then controls:Enable() end
+        end)
+    end))
+
+    CleanRagdoll()
+    table.insert(AntiRagdollConnections, LocalPlayer.CharacterAdded:Connect(function(newChar)
+        humanoid = newChar:WaitForChild("Humanoid")
+        trackedMotors = {}
+    end))
+end
+
+local function DisableAntiRagdoll()
+    AntiRagdollActive = false
+    for _, conn in pairs(AntiRagdollConnections) do conn:Disconnect() end
+    AntiRagdollConnections = {}
+    trackedMotors = {}
+end
+
+local function EnableAntiKnockback()
+    if AntiKnockbackActive then return end
+    AntiKnockbackActive = true
+    AntiKnockbackConnection = RunService.Heartbeat:Connect(function()
+        local character = LocalPlayer.Character
+        if not character then return end
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        local humanoid = character:FindFirstChild("Humanoid")
+        if not hrp or not humanoid then return end
+        local state = humanoid:GetState()
+        if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll or state == Enum.HumanoidStateType.FallingDown then return end
+        local vel = hrp.AssemblyLinearVelocity
+        local hs = Vector3.new(vel.X, 0, vel.Z).Magnitude
+        if hs > 50 then
+            local dir = Vector3.new(vel.X, 0, vel.Z).Unit
+            hrp.AssemblyLinearVelocity = Vector3.new(dir.X * 50, vel.Y, dir.Z * 50)
+        end
+    end)
+end
+
+local function DisableAntiKnockback()
+    AntiKnockbackActive = false
+    if AntiKnockbackConnection then AntiKnockbackConnection:Disconnect() AntiKnockbackConnection = nil end
+end
+
+local function GetNearestPlayerDistance()
+    local character = LocalPlayer.Character
+    if not character then return math.huge end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return math.huge end
+    local minDist = math.huge
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local o = player.Character:FindFirstChild("HumanoidRootPart")
+            if o then minDist = math.min(minDist, (hrp.Position - o.Position).Magnitude) end
+        end
+    end
+    return minDist
+end
+
+local function getPromptPosition(prompt)
+    local p = prompt.Parent
+    if p:IsA("Attachment") then return p.WorldPosition end
+    if p:IsA("BasePart") then return p.Position end
+    if p:IsA("Model") then
+        local pr = p.PrimaryPart or p:FindFirstChildWhichIsA("BasePart")
+        if pr then return pr.Position end
+    end
+    local f = p:FindFirstChildWhichIsA("BasePart", true)
+    if f then return f.Position end
+    return nil
+end
+
+local function findNearestStealPrompt()
+    local char = LocalPlayer.Character
+    if not char then return nil, math.huge end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil, math.huge end
+    local nearest, minDist = nil, math.huge
+    local plots = Workspace:FindFirstChild("Plots")
+    if plots then
+        for _, obj in ipairs(plots:GetDescendants()) do
+            if obj:IsA("ProximityPrompt") and obj.Enabled and obj.ActionText == "Steal" then
+                local pos = getPromptPosition(obj)
+                if pos then
+                    local dist = (hrp.Position - pos).Magnitude
+                    if dist < minDist then minDist = dist; nearest = obj end
+                end
+            end
+        end
+    end
+    return nearest, minDist
+end
+
+local function StartFloat()
+    if IsCurrentlyFloating then return end
+    IsCurrentlyFloating = true
+    local character = LocalPlayer.Character
+    if not character then return end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    FloatStartY = hrp.Position.Y
+    if FloatPlatform then FloatPlatform:Destroy() end
+    FloatPlatform = Instance.new("Part")
+    FloatPlatform.Size = Vector3.new(4, 0.5, 4)
+    FloatPlatform.Anchored = true
+    FloatPlatform.CanCollide = true
+    FloatPlatform.Transparency = 1
+    FloatPlatform.Name = "FloatPlatform"
+    FloatPlatform.Parent = Workspace
+    FloatPlatform.Position = hrp.Position - Vector3.new(0, 3, 0)
+    local hasReachedTop = false
+    local targetHeight = FloatStartY + FloatHeight - 3
+    local riseSpeed = FloatHeight / FloatSpeed
+    FloatConnection = RunService.Heartbeat:Connect(function(dt)
+        if not IsCurrentlyFloating or not FloatPlatform or not FloatPlatform.Parent or not hrp or not hrp.Parent then return end
+        local currentY = FloatPlatform.Position.Y
+        if not hasReachedTop and currentY < targetHeight then
+            FloatPlatform.Position = Vector3.new(hrp.Position.X, math.min(currentY + dt * riseSpeed, targetHeight), hrp.Position.Z)
+        else
+            hasReachedTop = true
+            FloatPlatform.Position = Vector3.new(hrp.Position.X, targetHeight, hrp.Position.Z)
+        end
+    end)
+end
+
+local function StopFloat()
+    if not IsCurrentlyFloating then return end
+    IsCurrentlyFloating = false
+    if FloatConnection then FloatConnection:Disconnect() FloatConnection = nil end
+    if FloatPlatform then FloatPlatform:Destroy() FloatPlatform = nil end
+end
+
+local function UpdateHitboxExpander(enabled)
+    if HitboxConnection then HitboxConnection:Disconnect() HitboxConnection = nil end
+    if enabled then
+        HitboxConnection = RunService.RenderStepped:Connect(function()
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and player.Character then
+                    local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        hrp.Size = Vector3.new(12, 12, 12)
+                        hrp.Transparency = 0.4
+                        hrp.Color = Color3.fromRGB(138, 43, 226)
+                        hrp.Material = Enum.Material.SmoothPlastic
+                        hrp.CanCollide = false
+                    end
+                end
+            end
+        end)
+    else
+        for _, player in pairs(Players:GetPlayers()) do
+            if player.Character then
+                local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    hrp.Size = Vector3.new(2, 2, 1)
+                    hrp.Transparency = 1
+                    hrp.Material = Enum.Material.Plastic
+                    hrp.CanCollide = true
+                end
+            end
+        end
+    end
+end
+
+local function FindBatTool()
+    local character = LocalPlayer.Character
+    if not character then return nil, false end
+    local eq = character:FindFirstChild("Bat")
+    if eq and eq:IsA("Tool") then return eq, true end
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if bp then
+        local bat = bp:FindFirstChild("Bat")
+        if bat and bat:IsA("Tool") then return bat, false end
+    end
+    return nil, false
+end
+
+local function EquipBatBySlot()
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if not bp then return end
+    local slot = 0
+    for _, tool in ipairs(bp:GetChildren()) do
+        if tool:IsA("Tool") then
+            slot = slot + 1
+            if tool.Name == "Bat" then break end
+        end
+    end
+    if slot > 0 and slot <= 9 then
+        local keys = {Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four, Enum.KeyCode.Five, Enum.KeyCode.Six, Enum.KeyCode.Seven, Enum.KeyCode.Eight, Enum.KeyCode.Nine}
+        pcall(function()
+            VirtualInputManager:SendKeyEvent(true, keys[slot], false, game)
+            task.wait()
+            VirtualInputManager:SendKeyEvent(false, keys[slot], false, game)
+        end)
+    end
+end
+
+local function SwingBat()
+    pcall(function()
+        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+        task.wait()
+        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+    end)
+end
+
+local function FindBestBrainrot()
+    local plots = Workspace:FindFirstChild("Plots")
+    if not plots then return nil, 0 end
+    local bestPos, bestVal = nil, 0
+    for _, plot in ipairs(plots:GetChildren()) do
+        local brainrots = plot:FindFirstChild("Brainrots") or plot:FindFirstChild("brainrots")
+        if brainrots then
+            for _, br in ipairs(brainrots:GetChildren()) do
+                local prompt = br:FindFirstChildWhichIsA("ProximityPrompt", true)
+                if prompt and prompt.ActionText == "Steal" then
+                    local value = 0
+                    local vo = br:FindFirstChild("Value") or br:FindFirstChild("Worth")
+                    if vo and vo:IsA("NumberValue") then value = vo.Value end
+                    if value == 0 then
+                        local nv = tonumber(string.match(br.Name, "%d+"))
+                        if nv then value = nv end
+                    end
+                    local pos = nil
+                    if br:IsA("BasePart") then pos = br.Position
+                    elseif br:IsA("Model") then
+                        local pr = br.PrimaryPart or br:FindFirstChildWhichIsA("BasePart")
+                        if pr then pos = pr.Position end
+                    end
+                    if pos and value > bestVal then bestVal = value; bestPos = pos end
+                end
+            end
+        end
+    end
+    return bestPos, bestVal
+end
+
+local function ChooseBestPath(targetPos)
+    if not targetPos then return Path1 end
+    local d1 = (Path1[#Path1] - targetPos).Magnitude
+    local d2 = (Path2[#Path2] - targetPos).Magnitude
+    return d1 < d2 and Path1 or Path2
+end
+
+local function StopTweenToBrainrot()
+    if TweenConnection then TweenConnection:Disconnect() TweenConnection = nil end
+    TweenCurrentWaypointIndex = 1
+    TweenAllWaypoints = {}
+    TweenToBrainrotEnabled = false
+    TweenArrived = false
+    TweenLastDirection = nil
+    TweenStealPhase = false
+    TweenGrabComplete = false
+end
+
+local function StartTweenToBrainrot()
+    if TweenConnection then return end
+    
+    if WalkFlingRunning then
+        KillWalkFling()
+        SetWalkFling(false)
+    end
+    
+    local brainrotPos, value = FindBestBrainrot()
+    local path = ChooseBestPath(brainrotPos)
+    
+    TweenAllWaypoints = {}
+    for _, wp in ipairs(path) do table.insert(TweenAllWaypoints, wp) end
+    if brainrotPos then table.insert(TweenAllWaypoints, brainrotPos) end
+    
+    TweenCurrentWaypointIndex = 1
+    TweenToBrainrotEnabled = true
+    TweenArrived = false
+    TweenLastDirection = nil
+    TweenStealPhase = false
+    TweenGrabComplete = false
+    
+    if not AutoGrabEnabled then
+        AutoGrabEnabled = true
+        SetAutoGrab(true)
+        GrabStartTime = 0
+        CurrentGrabPrompt = nil
+        StatusLabel.Text = "Searching..."
+        StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+    end
+    
+    local extraDistanceRemaining = EXTRA_DISTANCE
+    local movingExtra = false
+    
+    TweenConnection = RunService.Heartbeat:Connect(function()
+        if not TweenToBrainrotEnabled then return end
+        local character = LocalPlayer.Character
+        if not character then return end
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        local humanoid = character:FindFirstChild("Humanoid")
+        if not hrp or not humanoid or humanoid.Health <= 0 then return end
+        local state = humanoid:GetState()
+        if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll or state == Enum.HumanoidStateType.FallingDown then return end
+        
+        if TweenGrabComplete then
+            StopTweenToBrainrot()
+            SetTweenToBrainrot(false)
+            return
+        end
+        
+        if TweenStealPhase then
+            return
+        end
+        
+        if movingExtra then
+            if extraDistanceRemaining > 0 then
+                local moveAmount = math.min(TweenWalkSpeed * 0.016, extraDistanceRemaining)
+                extraDistanceRemaining = extraDistanceRemaining - moveAmount
+                if TweenLastDirection then
+                    hrp.AssemblyLinearVelocity = Vector3.new(TweenLastDirection.X * TweenWalkSpeed, hrp.AssemblyLinearVelocity.Y, TweenLastDirection.Z * TweenWalkSpeed)
+                end
+            else
+                TweenArrived = true
+                hrp.AssemblyLinearVelocity = Vector3.new(0, hrp.AssemblyLinearVelocity.Y, 0)
+            end
+            return
+        end
+        
+        if TweenCurrentWaypointIndex > #TweenAllWaypoints then
+            movingExtra = true
+            return
+        end
+        
+        local targetPos = TweenAllWaypoints[TweenCurrentWaypointIndex]
+        local direction = Vector3.new(targetPos.X - hrp.Position.X, 0, targetPos.Z - hrp.Position.Z)
+        
+        if direction.Magnitude < 4 then
+            TweenCurrentWaypointIndex = TweenCurrentWaypointIndex + 1
+            if direction.Magnitude > 0.1 then
+                TweenLastDirection = direction.Unit
+            end
+            return
+        end
+        
+        local dir = direction.Unit
+        TweenLastDirection = dir
+        hrp.AssemblyLinearVelocity = Vector3.new(dir.X * TweenWalkSpeed, hrp.AssemblyLinearVelocity.Y, dir.Z * TweenWalkSpeed)
+    end)
+end
+
+task.spawn(function()
+    while task.wait(BatSpamDelay) do
+        if not AutoBatEnabled then continue end
+        if TweenToBrainrotEnabled and not TweenArrived then continue end
+        local bat, isEquipped = FindBatTool()
+        if bat then
+            if not isEquipped then EquipBatBySlot() else SwingBat() end
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.1) do
+        if not WalkFlingRunning then continue end
+        if TweenToBrainrotEnabled then continue end
+        local _, promptDist = findNearestStealPrompt()
+        if promptDist < STEAL_DISABLE_RANGE then
+            KillWalkFling()
+            SetWalkFling(false)
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.05) do
+        if not FloatStealEnabled then
+            if IsCurrentlyFloating then StopFloat() end
+            continue
+        end
+        local character = LocalPlayer.Character
+        if not character then continue end
+        local humanoid = character:FindFirstChild("Humanoid")
+        if not humanoid then continue end
+        local isStealing = humanoid.WalkSpeed <= 25
+        local playerNearby = GetNearestPlayerDistance() <= SmartFloatRange
+        if isStealing and playerNearby and not IsCurrentlyFloating then StartFloat()
+        elseif (not isStealing or not playerNearby) and IsCurrentlyFloating then StopFloat() end
+    end
+end)
+
+TrackConnection(RunService.Heartbeat:Connect(function()
+    if not AutoGrabEnabled then
+        GrabStartTime = 0
+        CurrentGrabPrompt = nil
+        return
+    end
+    
+    if TweenToBrainrotEnabled and not TweenArrived then return end
+    
+    local prompt, dist = findNearestStealPrompt()
+    local inRange = dist <= AutoGrabRange
+    
+    if inRange and prompt and prompt.Parent and prompt.Enabled then
+        if CurrentGrabPrompt ~= prompt then
+            CurrentGrabPrompt = prompt
+            GrabStartTime = tick()
+            ProgFill.Size = UDim2.new(0, 0, 1, 0)
+            ProgPercent.Text = "0%"
+        end
+        
+        pcall(function()
+            fireproximityprompt(prompt)
+        end)
+        
+        local holdDuration = prompt.HoldDuration or 1
+        if holdDuration <= 0 then holdDuration = 1 end
+        
+        local elapsed = tick() - GrabStartTime
+        local progress = math.clamp(elapsed / holdDuration, 0, 1)
+        local percent = math.floor(progress * 100)
+        
+        ProgFill.Size = UDim2.new(progress, 0, 1, 0)
+        ProgPercent.Text = percent .. "%"
+        StatusLabel.Text = "Stealing..."
+        StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+        
+        if TweenToBrainrotEnabled and TweenArrived then
+            TweenStealPhase = true
+        end
+    else
+        if CurrentGrabPrompt then
+            StatusLabel.Text = "Stolen!"
+            StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+            ProgFill.Size = UDim2.new(1, 0, 1, 0)
+            ProgPercent.Text = "100%"
+            
+            if TweenStealPhase then
+                TweenGrabComplete = true
+            end
+            
+            task.delay(0.15, function()
+                if not CurrentGrabPrompt then
+                    ProgFill.Size = UDim2.new(0, 0, 1, 0)
+                    ProgPercent.Text = "0%"
+                    StatusLabel.Text = "Searching..."
+                    StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+                end
+            end)
+            
+            CurrentGrabPrompt = nil
+            GrabStartTime = 0
+        end
+    end
+end))
+
+TrackConnection(RunService.Heartbeat:Connect(function()
+    if not SpeedBoostEnabled then return end
+    if TweenToBrainrotEnabled and not TweenGrabComplete then return end
+    local character = LocalPlayer.Character
+    if not character then return end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChild("Humanoid")
+    if not hrp or not humanoid or humanoid.Health <= 0 then return end
+    local state = humanoid:GetState()
+    if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll or state == Enum.HumanoidStateType.FallingDown or state == Enum.HumanoidStateType.GettingUp then return end
+    local isStealing = humanoid.WalkSpeed <= 25
+    local currentSpeed = isStealing and StealSpeed or NormalSpeed
+    if isStealing then
+        SpeedStatusLabel.Text = "STEALING - " .. tostring(StealSpeed)
+        SpeedStatusLabel.TextColor3 = Color3.fromRGB(255, 180, 50)
+    else
+        SpeedStatusLabel.Text = "NORMAL - " .. tostring(NormalSpeed)
+        SpeedStatusLabel.TextColor3 = Color3.fromRGB(0, 200, 100)
+    end
+    local moveDir = humanoid.MoveDirection
+    if moveDir.Magnitude > 0.1 then
+        local dir = moveDir.Unit
+        hrp.AssemblyLinearVelocity = Vector3.new(dir.X * currentSpeed, hrp.AssemblyLinearVelocity.Y, dir.Z * currentSpeed)
+    end
+end))
+
+local lastAntiRagdoll = false
+local lastAntiKnockback = false
+local lastWalkFling = false
+local lastAutoGrab = false
+local lastFloatSteal = false
+local lastSpeedBoost = false
+local lastHitbox = false
+local lastAutoBat = false
+local lastTweenToBrainrot = false
+
+TrackConnection(RunService.Heartbeat:Connect(function()
+    local ar = GetAntiRagdoll()
+    local ak = GetAntiKnockback()
+    local wf = GetWalkFling()
+    local ag = GetAutoGrabFunc()
+    local fs = GetFloatSteal()
+    local sb = GetSpeedBoost()
+    local hb = GetHitboxExp()
+    local ab = GetAutoBat()
+    local tb = GetTweenToBrainrot()
+
+    if ar ~= lastAntiRagdoll then
+        if ar then EnableAntiRagdoll() else DisableAntiRagdoll() end
+        lastAntiRagdoll = ar
+    end
+
+    if ak ~= lastAntiKnockback then
+        if ak then EnableAntiKnockback() else DisableAntiKnockback() end
+        lastAntiKnockback = ak
+    end
+
+    if wf ~= lastWalkFling then
+        if wf then
+            if TweenToBrainrotEnabled then
+                SetWalkFling(false)
+            else
+                StartWalkFling()
+            end
+        else
+            KillWalkFling()
+        end
+        lastWalkFling = wf
+    end
+
+    if ag ~= lastAutoGrab then
+        AutoGrabEnabled = ag
+        if not ag then
+            GrabStartTime = 0
+            CurrentGrabPrompt = nil
+            StatusLabel.Text = "Disabled"
+            StatusLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
+            ProgFill.Size = UDim2.new(0, 0, 1, 0)
+            ProgPercent.Text = "0%"
+        else
+            GrabStartTime = 0
+            CurrentGrabPrompt = nil
+            StatusLabel.Text = "Searching..."
+            StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+        end
+        lastAutoGrab = ag
+    end
+
+    if fs ~= lastFloatSteal then
+        FloatStealEnabled = fs
+        if not fs then StopFloat() end
+        lastFloatSteal = fs
+    end
+
+    if sb ~= lastSpeedBoost then
+        SpeedBoostEnabled = sb
+        SpeedFrame.Visible = sb
+        lastSpeedBoost = sb
+    end
+
+    if hb ~= lastHitbox then
+        UpdateHitboxExpander(hb)
+        lastHitbox = hb
+    end
+
+    if ab ~= lastAutoBat then
+        AutoBatEnabled = ab
+        lastAutoBat = ab
+    end
+
+    if tb ~= lastTweenToBrainrot then
+        TweenToBrainrotEnabled = tb
+        if tb then StartTweenToBrainrot() else StopTweenToBrainrot() end
+        lastTweenToBrainrot = tb
+    end
+end))
+
+local function FullCleanup()
+    CleanupAllConnections()
+    KillWalkFling()
+    DisableAntiRagdoll()
+    DisableAntiKnockback()
+    StopFloat()
+    StopTweenToBrainrot()
+    UpdateHitboxExpander(false)
+    if FloatPlatform then FloatPlatform:Destroy() FloatPlatform = nil end
+    AutoGrabEnabled = false
+    SpeedBoostEnabled = false
+    AutoBatEnabled = false
+    FloatStealEnabled = false
+end
+
+CloseButton.MouseButton1Click:Connect(function()
+    FullCleanup()
+    ScreenGui:Destroy()
+end)
+
+TrackConnection(LocalPlayer.CharacterAdded:Connect(function()
+    StopFloat()
+    StopTweenToBrainrot()
+    SetTweenToBrainrot(false)
+    GrabStartTime = 0
+    CurrentGrabPrompt = nil
+end))

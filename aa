@@ -14,7 +14,6 @@ local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
 local SaveFileName = "SchmecktPvP_Settings.json"
-
 local AllConnections = {}
 
 local function TrackConnection(conn)
@@ -32,8 +31,7 @@ end
 local function LoadSettings()
     local success, result = pcall(function()
         if readfile then
-            local data = readfile(SaveFileName)
-            return HttpService:JSONDecode(data)
+            return HttpService:JSONDecode(readfile(SaveFileName))
         end
     end)
     if success and result then return result end
@@ -49,7 +47,6 @@ local function SaveSettings(settings)
 end
 
 local SavedSettings = LoadSettings()
-
 local ScaleFactor = 1
 local SelectedVersion = nil
 
@@ -68,7 +65,6 @@ local trackedMotors = {}
 
 local AntiKnockbackActive = false
 local AntiKnockbackConnection = nil
-
 local HitboxConnection = nil
 
 local FloatStealEnabled = false
@@ -93,12 +89,10 @@ local TweenWalkSpeed = 59
 local TweenCurrentWaypointIndex = 1
 local TweenAllWaypoints = {}
 local TweenArrived = false
-local TweenLastDirection = nil
 local TweenStealPhase = false
 local TweenGrabComplete = false
 
 local STEAL_DISABLE_RANGE = 12
-local EXTRA_DISTANCE = 2.5
 
 local Path1 = {
     Vector3.new(-475.8, -7.31, 97.53),
@@ -110,24 +104,27 @@ local Path2 = {
     Vector3.new(-488.04, -5.31, 26.42)
 }
 
-local SetWalkFling = nil
-local SetTweenToBrainrot = nil
-local SetAutoGrab = nil
-local GetWalkFling = nil
-local GetTweenToBrainrot = nil
-local GetAutoGrabFunc = nil
-local GetFloatSteal = nil
-local GetSpeedBoost = nil
-local GetHitboxExp = nil
-local GetAutoBat = nil
-local GetAntiRagdoll = nil
-local GetAntiKnockback = nil
-local ScreenGui = nil
-local StatusLabel = nil
-local ProgFill = nil
-local ProgPercent = nil
-local SpeedFrame = nil
-local SpeedStatusLabel = nil
+local Database = {}
+
+local function LoadDatabase()
+    local animals = ReplicatedStorage:FindFirstChild("Animals", true)
+    if animals and animals:IsA("ModuleScript") then
+        local success, data = pcall(require, animals)
+        if success then
+            for key, info in pairs(data) do
+                if info.Generation then
+                    Database[key] = tonumber(tostring(info.Generation)) or 0
+                end
+            end
+        end
+    end
+end
+
+LoadDatabase()
+
+local SetWalkFling, SetTweenToBrainrot, SetAutoGrab
+local GetWalkFling, GetTweenToBrainrot, GetAutoGrabFunc, GetFloatSteal, GetSpeedBoost, GetHitboxExp, GetAutoBat, GetAntiRagdoll, GetAntiKnockback
+local ScreenGui, StatusLabel, ProgFill, ProgPercent, SpeedFrame, SpeedStatusLabel, TweenStatusLabel, TweenInfoLabel, TweenButton
 
 local function ShowVersionSelector()
     local SelectorGui = Instance.new("ScreenGui")
@@ -142,9 +139,7 @@ local function ShowVersionSelector()
     SelectorFrame.BorderSizePixel = 0
     SelectorFrame.Parent = SelectorGui
     Instance.new("UICorner", SelectorFrame).CornerRadius = UDim.new(0, 10)
-    local SelectorStroke = Instance.new("UIStroke", SelectorFrame)
-    SelectorStroke.Color = Color3.fromRGB(138, 43, 226)
-    SelectorStroke.Thickness = 2
+    Instance.new("UIStroke", SelectorFrame).Color = Color3.fromRGB(138, 43, 226)
 
     local TitleLabel = Instance.new("TextLabel")
     TitleLabel.Size = UDim2.new(1, 0, 0, 40)
@@ -217,9 +212,7 @@ MainFrame.Active = true
 MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8 * ScaleFactor)
-local MainStroke = Instance.new("UIStroke", MainFrame)
-MainStroke.Color = Color3.fromRGB(138, 43, 226)
-MainStroke.Thickness = 2 * ScaleFactor
+Instance.new("UIStroke", MainFrame).Color = Color3.fromRGB(138, 43, 226)
 
 local TopBar = Instance.new("Frame")
 TopBar.Size = UDim2.new(1, 0, 0, 32 * ScaleFactor)
@@ -281,14 +274,8 @@ local function CreateToggle(parent, text, yPos, settingKey, defaultState)
     Separator.Size = UDim2.new(1, -20 * ScaleFactor, 0, 1 * ScaleFactor)
     Separator.Position = UDim2.new(0, 10 * ScaleFactor, 0, (yPos + 38) * ScaleFactor)
     Separator.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
-    Instance.new("UIStroke", Separator).Color = Color3.fromRGB(138, 43, 226)
 
-    local toggled = false
-    if settingKey and SavedSettings[settingKey] ~= nil then
-        toggled = SavedSettings[settingKey]
-    elseif defaultState then
-        toggled = defaultState
-    end
+    local toggled = (settingKey and SavedSettings[settingKey] ~= nil) and SavedSettings[settingKey] or defaultState or false
 
     local function updateVisual()
         if toggled then
@@ -382,7 +369,6 @@ end)
 TrackConnection(UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-    
     if IsListeningForKeybind then
         WalkFlingKeybind = input.KeyCode
         KeybindButton.Text = input.KeyCode.Name
@@ -390,15 +376,10 @@ TrackConnection(UserInputService.InputBegan:Connect(function(input, gameProcesse
         IsListeningForKeybind = false
         return
     end
-    
     if input.KeyCode == WalkFlingKeybind then
         SetWalkFling(not GetWalkFling())
-        return
-    end
-    
-    if input.KeyCode == Enum.KeyCode.R then
+    elseif input.KeyCode == Enum.KeyCode.R then
         SetTweenToBrainrot(not GetTweenToBrainrot())
-        return
     end
 end))
 
@@ -449,8 +430,7 @@ ProgFill.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
 ProgFill.BorderSizePixel = 0
 ProgFill.Parent = ProgBarBg
 Instance.new("UICorner", ProgFill).CornerRadius = UDim.new(1, 0)
-local FillGradient = Instance.new("UIGradient", ProgFill)
-FillGradient.Color = ColorSequence.new{
+Instance.new("UIGradient", ProgFill).Color = ColorSequence.new{
     ColorSequenceKeypoint.new(0, Color3.fromRGB(138, 43, 226)),
     ColorSequenceKeypoint.new(0.5, Color3.fromRGB(220, 150, 255)),
     ColorSequenceKeypoint.new(1, Color3.fromRGB(138, 43, 226))
@@ -466,6 +446,56 @@ ProgPercent.Font = Enum.Font.GothamBold
 ProgPercent.TextSize = 10 * ScaleFactor
 ProgPercent.TextXAlignment = Enum.TextXAlignment.Right
 ProgPercent.Parent = ProgressFrame
+
+local TweenFrame = Instance.new("Frame")
+TweenFrame.Size = UDim2.new(0, 200 * ScaleFactor, 0, 100 * ScaleFactor)
+TweenFrame.Position = UDim2.new(0, 20 * ScaleFactor, 1, -120 * ScaleFactor)
+TweenFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+TweenFrame.BorderSizePixel = 0
+TweenFrame.Visible = false
+TweenFrame.Active = true
+TweenFrame.Draggable = true
+TweenFrame.Parent = ScreenGui
+Instance.new("UICorner", TweenFrame).CornerRadius = UDim.new(0, 10 * ScaleFactor)
+Instance.new("UIStroke", TweenFrame).Color = Color3.fromRGB(138, 43, 226)
+
+local TweenTitle = Instance.new("TextLabel", TweenFrame)
+TweenTitle.Size = UDim2.new(1, 0, 0, 22 * ScaleFactor)
+TweenTitle.BackgroundTransparency = 1
+TweenTitle.Text = "TWEEN TO BRAINROT"
+TweenTitle.TextColor3 = Color3.fromRGB(138, 43, 226)
+TweenTitle.Font = Enum.Font.GothamBlack
+TweenTitle.TextSize = 11 * ScaleFactor
+
+TweenStatusLabel = Instance.new("TextLabel", TweenFrame)
+TweenStatusLabel.Size = UDim2.new(1, -16 * ScaleFactor, 0, 16 * ScaleFactor)
+TweenStatusLabel.Position = UDim2.new(0, 8 * ScaleFactor, 0, 22 * ScaleFactor)
+TweenStatusLabel.BackgroundTransparency = 1
+TweenStatusLabel.Text = "Status: Idle"
+TweenStatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+TweenStatusLabel.Font = Enum.Font.Gotham
+TweenStatusLabel.TextSize = 10 * ScaleFactor
+TweenStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+TweenInfoLabel = Instance.new("TextLabel", TweenFrame)
+TweenInfoLabel.Size = UDim2.new(1, -16 * ScaleFactor, 0, 16 * ScaleFactor)
+TweenInfoLabel.Position = UDim2.new(0, 8 * ScaleFactor, 0, 38 * ScaleFactor)
+TweenInfoLabel.BackgroundTransparency = 1
+TweenInfoLabel.Text = "Path: --"
+TweenInfoLabel.TextColor3 = Color3.fromRGB(180, 130, 255)
+TweenInfoLabel.Font = Enum.Font.Gotham
+TweenInfoLabel.TextSize = 9 * ScaleFactor
+TweenInfoLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+TweenButton = Instance.new("TextButton", TweenFrame)
+TweenButton.Size = UDim2.new(1, -16 * ScaleFactor, 0, 30 * ScaleFactor)
+TweenButton.Position = UDim2.new(0, 8 * ScaleFactor, 0, 60 * ScaleFactor)
+TweenButton.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
+TweenButton.Text = "START"
+TweenButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+TweenButton.Font = Enum.Font.GothamBold
+TweenButton.TextSize = 12 * ScaleFactor
+Instance.new("UICorner", TweenButton).CornerRadius = UDim.new(0, 6 * ScaleFactor)
 
 SpeedFrame = Instance.new("Frame")
 SpeedFrame.Size = UDim2.new(0, 200 * ScaleFactor, 0, 70 * ScaleFactor)
@@ -612,15 +642,6 @@ local function EnableAntiRagdoll()
     local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
     local humanoid = character:WaitForChild("Humanoid")
 
-    pcall(function()
-        local p = ReplicatedStorage:WaitForChild("Packages", 2)
-        if p then p = p:FindFirstChild("Ragdoll")
-            if p and p:FindFirstChild("Ragdoll") then p = p:FindFirstChild("Ragdoll")
-                if p:IsA("RemoteEvent") then p.FireClient = function() end end
-            end
-        end
-    end)
-
     local function WatchMotor(motor)
         if not motor:IsA("Motor6D") or trackedMotors[motor] then return end
         trackedMotors[motor] = true
@@ -633,31 +654,18 @@ local function EnableAntiRagdoll()
     for _, desc in ipairs(character:GetDescendants()) do WatchMotor(desc) end
     table.insert(AntiRagdollConnections, character.DescendantAdded:Connect(WatchMotor))
 
-    local function CleanRagdoll()
+    table.insert(AntiRagdollConnections, RunService.Heartbeat:Connect(function()
         for _, obj in pairs(character:GetDescendants()) do
-            if obj:IsA("BallSocketConstraint") or obj:IsA("NoCollisionConstraint") or obj:IsA("HingeConstraint")
-                or (obj:IsA("Attachment") and (obj.Name == "RagdollAttachment" or obj.Name == "A" or obj.Name == "B")) then
+            if obj:IsA("BallSocketConstraint") or obj:IsA("NoCollisionConstraint") or obj:IsA("HingeConstraint") then
                 obj:Destroy()
             end
         end
-    end
-
-    table.insert(AntiRagdollConnections, RunService.Heartbeat:Connect(function()
-        CleanRagdoll()
         local state = humanoid:GetState()
         if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll or state == Enum.HumanoidStateType.FallingDown then
             humanoid:ChangeState(Enum.HumanoidStateType.Running)
         end
     end))
 
-    table.insert(AntiRagdollConnections, RunService.RenderStepped:Connect(function()
-        pcall(function()
-            local controls = require(LocalPlayer:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule")):GetControls()
-            if controls then controls:Enable() end
-        end)
-    end))
-
-    CleanRagdoll()
     table.insert(AntiRagdollConnections, LocalPlayer.CharacterAdded:Connect(function(newChar)
         humanoid = newChar:WaitForChild("Humanoid")
         trackedMotors = {}
@@ -681,7 +689,7 @@ local function EnableAntiKnockback()
         local humanoid = character:FindFirstChild("Humanoid")
         if not hrp or not humanoid then return end
         local state = humanoid:GetState()
-        if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll or state == Enum.HumanoidStateType.FallingDown then return end
+        if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll then return end
         local vel = hrp.AssemblyLinearVelocity
         local hs = Vector3.new(vel.X, 0, vel.Z).Magnitude
         if hs > 50 then
@@ -720,8 +728,7 @@ local function getPromptPosition(prompt)
         if pr then return pr.Position end
     end
     local f = p:FindFirstChildWhichIsA("BasePart", true)
-    if f then return f.Position end
-    return nil
+    return f and f.Position or nil
 end
 
 local function findNearestStealPrompt()
@@ -737,7 +744,7 @@ local function findNearestStealPrompt()
                 local pos = getPromptPosition(obj)
                 if pos then
                     local dist = (hrp.Position - pos).Magnitude
-                    if dist < minDist then minDist = dist; nearest = obj end
+                    if dist < minDist then minDist, nearest = dist, obj end
                 end
             end
         end
@@ -808,7 +815,6 @@ local function UpdateHitboxExpander(enabled)
                 if hrp then
                     hrp.Size = Vector3.new(2, 2, 1)
                     hrp.Transparency = 1
-                    hrp.Material = Enum.Material.Plastic
                     hrp.CanCollide = true
                 end
             end
@@ -857,76 +863,103 @@ local function SwingBat()
     end)
 end
 
-local function FindBestBrainrot()
+local function GetMyPlot()
     local plots = Workspace:FindFirstChild("Plots")
-    if not plots then return nil, 0 end
-    local bestPos, bestVal = nil, 0
-    for _, plot in ipairs(plots:GetChildren()) do
-        local brainrots = plot:FindFirstChild("Brainrots") or plot:FindFirstChild("brainrots")
-        if brainrots then
-            for _, br in ipairs(brainrots:GetChildren()) do
-                local prompt = br:FindFirstChildWhichIsA("ProximityPrompt", true)
-                if prompt and prompt.ActionText == "Steal" then
-                    local value = 0
-                    local vo = br:FindFirstChild("Value") or br:FindFirstChild("Worth")
-                    if vo and vo:IsA("NumberValue") then value = vo.Value end
-                    if value == 0 then
-                        local nv = tonumber(string.match(br.Name, "%d+"))
-                        if nv then value = nv end
-                    end
-                    local pos = nil
-                    if br:IsA("BasePart") then pos = br.Position
-                    elseif br:IsA("Model") then
-                        local pr = br.PrimaryPart or br:FindFirstChildWhichIsA("BasePart")
-                        if pr then pos = pr.Position end
-                    end
-                    if pos and value > bestVal then bestVal = value; bestPos = pos end
+    if not plots then return nil end
+    for _, plot in pairs(plots:GetChildren()) do
+        for _, obj in pairs(plot:GetDescendants()) do
+            if obj:IsA("TextLabel") and obj.Text then
+                if obj.Text:find(LocalPlayer.Name) or obj.Text:find(LocalPlayer.DisplayName) then
+                    return plot
                 end
             end
         end
     end
-    return bestPos, bestVal
+    return nil
 end
 
-local function ChooseBestPath(targetPos)
-    if not targetPos then return Path1 end
-    local d1 = (Path1[#Path1] - targetPos).Magnitude
-    local d2 = (Path2[#Path2] - targetPos).Magnitude
-    return d1 < d2 and Path1 or Path2
+local function GetBestPet()
+    local bestModel, bestValue, bestPos = nil, -1, nil
+    local plots = Workspace:FindFirstChild("Plots")
+    if not plots then return nil, nil, -1 end
+    local myPlot = GetMyPlot()
+    for _, plot in pairs(plots:GetChildren()) do
+        if plot ~= myPlot then
+            for _, obj in pairs(plot:GetDescendants()) do
+                if obj:IsA("Model") and Database[obj.Name] then
+                    local val = Database[obj.Name]
+                    if val > bestValue then
+                        local root = obj:FindFirstChild("HumanoidRootPart") or obj.PrimaryPart
+                        if root then
+                            bestValue, bestModel, bestPos = val, obj, root.Position
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return bestModel, bestPos, bestValue
+end
+
+local function ChooseBestPath(brainrotPos)
+    if not brainrotPos then return Path1, "Path1" end
+    local dist1 = (Path1[#Path1] - brainrotPos).Magnitude
+    local dist2 = (Path2[#Path2] - brainrotPos).Magnitude
+    if dist1 < dist2 then
+        return Path1, "Path1"
+    else
+        return Path2, "Path2"
+    end
 end
 
 local function StopTweenToBrainrot()
+    TweenToBrainrotEnabled = false
     if TweenConnection then TweenConnection:Disconnect() TweenConnection = nil end
     TweenCurrentWaypointIndex = 1
     TweenAllWaypoints = {}
-    TweenToBrainrotEnabled = false
     TweenArrived = false
-    TweenLastDirection = nil
     TweenStealPhase = false
     TweenGrabComplete = false
+    TweenButton.Text = "START"
+    TweenButton.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
+    TweenStatusLabel.Text = "Status: Stopped"
+    TweenStatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
 end
 
 local function StartTweenToBrainrot()
-    if TweenConnection then return end
+    if TweenToBrainrotEnabled then return end
     
     if WalkFlingRunning then
         KillWalkFling()
         SetWalkFling(false)
     end
     
-    local brainrotPos, value = FindBestBrainrot()
-    local path = ChooseBestPath(brainrotPos)
+    local bestModel, brainrotPos, bestValue = GetBestPet()
+    
+    if not brainrotPos then
+        TweenStatusLabel.Text = "Status: No Brainrot!"
+        TweenStatusLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
+        return
+    end
+    
+    local path, pathName = ChooseBestPath(brainrotPos)
+    
+    TweenInfoLabel.Text = pathName .. " | " .. bestModel.Name .. " (Gen " .. bestValue .. ")"
     
     TweenAllWaypoints = {}
-    for _, wp in ipairs(path) do table.insert(TweenAllWaypoints, wp) end
-    if brainrotPos then table.insert(TweenAllWaypoints, brainrotPos) end
+    for _, wp in ipairs(path) do
+        table.insert(TweenAllWaypoints, wp)
+    end
+    table.insert(TweenAllWaypoints, brainrotPos)
     
     TweenCurrentWaypointIndex = 1
     TweenToBrainrotEnabled = true
     TweenArrived = false
-    TweenLastDirection = nil
     TweenStealPhase = false
     TweenGrabComplete = false
+    
+    TweenButton.Text = "STOP"
+    TweenButton.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
     
     if not AutoGrabEnabled then
         AutoGrabEnabled = true
@@ -937,64 +970,64 @@ local function StartTweenToBrainrot()
         StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
     end
     
-    local extraDistanceRemaining = EXTRA_DISTANCE
-    local movingExtra = false
-    
     TweenConnection = RunService.Heartbeat:Connect(function()
         if not TweenToBrainrotEnabled then return end
+        
         local character = LocalPlayer.Character
         if not character then return end
         local hrp = character:FindFirstChild("HumanoidRootPart")
         local humanoid = character:FindFirstChild("Humanoid")
         if not hrp or not humanoid or humanoid.Health <= 0 then return end
+        
         local state = humanoid:GetState()
         if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll or state == Enum.HumanoidStateType.FallingDown then return end
         
         if TweenGrabComplete then
+            TweenStatusLabel.Text = "Status: Complete!"
+            TweenStatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
             StopTweenToBrainrot()
             SetTweenToBrainrot(false)
             return
         end
         
         if TweenStealPhase then
-            return
-        end
-        
-        if movingExtra then
-            if extraDistanceRemaining > 0 then
-                local moveAmount = math.min(TweenWalkSpeed * 0.016, extraDistanceRemaining)
-                extraDistanceRemaining = extraDistanceRemaining - moveAmount
-                if TweenLastDirection then
-                    hrp.AssemblyLinearVelocity = Vector3.new(TweenLastDirection.X * TweenWalkSpeed, hrp.AssemblyLinearVelocity.Y, TweenLastDirection.Z * TweenWalkSpeed)
-                end
-            else
-                TweenArrived = true
-                hrp.AssemblyLinearVelocity = Vector3.new(0, hrp.AssemblyLinearVelocity.Y, 0)
-            end
+            TweenStatusLabel.Text = "Status: Stealing..."
+            TweenStatusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
             return
         end
         
         if TweenCurrentWaypointIndex > #TweenAllWaypoints then
-            movingExtra = true
+            TweenArrived = true
+            TweenStatusLabel.Text = "Status: Arrived!"
+            TweenStatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+            hrp.AssemblyLinearVelocity = Vector3.new(0, hrp.AssemblyLinearVelocity.Y, 0)
             return
         end
         
-        local targetPos = TweenAllWaypoints[TweenCurrentWaypointIndex]
-        local direction = Vector3.new(targetPos.X - hrp.Position.X, 0, targetPos.Z - hrp.Position.Z)
+        local target = TweenAllWaypoints[TweenCurrentWaypointIndex]
+        local direction = Vector3.new(target.X - hrp.Position.X, 0, target.Z - hrp.Position.Z)
+        
+        TweenStatusLabel.Text = "Status: Walking " .. TweenCurrentWaypointIndex .. "/" .. #TweenAllWaypoints
+        TweenStatusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
         
         if direction.Magnitude < 4 then
             TweenCurrentWaypointIndex = TweenCurrentWaypointIndex + 1
-            if direction.Magnitude > 0.1 then
-                TweenLastDirection = direction.Unit
-            end
             return
         end
         
         local dir = direction.Unit
-        TweenLastDirection = dir
         hrp.AssemblyLinearVelocity = Vector3.new(dir.X * TweenWalkSpeed, hrp.AssemblyLinearVelocity.Y, dir.Z * TweenWalkSpeed)
     end)
 end
+
+TweenButton.MouseButton1Click:Connect(function()
+    if TweenToBrainrotEnabled then
+        StopTweenToBrainrot()
+        SetTweenToBrainrot(false)
+    else
+        SetTweenToBrainrot(true)
+    end
+end)
 
 task.spawn(function()
     while task.wait(BatSpamDelay) do
@@ -1042,7 +1075,6 @@ TrackConnection(RunService.Heartbeat:Connect(function()
         CurrentGrabPrompt = nil
         return
     end
-    
     if TweenToBrainrotEnabled and not TweenArrived then return end
     
     local prompt, dist = findNearestStealPrompt()
@@ -1056,19 +1088,15 @@ TrackConnection(RunService.Heartbeat:Connect(function()
             ProgPercent.Text = "0%"
         end
         
-        pcall(function()
-            fireproximityprompt(prompt)
-        end)
+        pcall(function() fireproximityprompt(prompt) end)
         
         local holdDuration = prompt.HoldDuration or 1
         if holdDuration <= 0 then holdDuration = 1 end
-        
         local elapsed = tick() - GrabStartTime
         local progress = math.clamp(elapsed / holdDuration, 0, 1)
-        local percent = math.floor(progress * 100)
         
         ProgFill.Size = UDim2.new(progress, 0, 1, 0)
-        ProgPercent.Text = percent .. "%"
+        ProgPercent.Text = math.floor(progress * 100) .. "%"
         StatusLabel.Text = "Stealing..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
         
@@ -1110,16 +1138,11 @@ TrackConnection(RunService.Heartbeat:Connect(function()
     local humanoid = character:FindFirstChild("Humanoid")
     if not hrp or not humanoid or humanoid.Health <= 0 then return end
     local state = humanoid:GetState()
-    if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll or state == Enum.HumanoidStateType.FallingDown or state == Enum.HumanoidStateType.GettingUp then return end
+    if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll or state == Enum.HumanoidStateType.FallingDown then return end
     local isStealing = humanoid.WalkSpeed <= 25
     local currentSpeed = isStealing and StealSpeed or NormalSpeed
-    if isStealing then
-        SpeedStatusLabel.Text = "STEALING - " .. tostring(StealSpeed)
-        SpeedStatusLabel.TextColor3 = Color3.fromRGB(255, 180, 50)
-    else
-        SpeedStatusLabel.Text = "NORMAL - " .. tostring(NormalSpeed)
-        SpeedStatusLabel.TextColor3 = Color3.fromRGB(0, 200, 100)
-    end
+    SpeedStatusLabel.Text = (isStealing and "STEALING - " or "NORMAL - ") .. tostring(currentSpeed)
+    SpeedStatusLabel.TextColor3 = isStealing and Color3.fromRGB(255, 180, 50) or Color3.fromRGB(0, 200, 100)
     local moveDir = humanoid.MoveDirection
     if moveDir.Magnitude > 0.1 then
         local dir = moveDir.Unit
@@ -1127,93 +1150,60 @@ TrackConnection(RunService.Heartbeat:Connect(function()
     end
 end))
 
-local lastAntiRagdoll = false
-local lastAntiKnockback = false
-local lastWalkFling = false
-local lastAutoGrab = false
-local lastFloatSteal = false
-local lastSpeedBoost = false
-local lastHitbox = false
-local lastAutoBat = false
-local lastTweenToBrainrot = false
+local lastAntiRagdoll, lastAntiKnockback, lastWalkFling, lastAutoGrab = false, false, false, false
+local lastFloatSteal, lastSpeedBoost, lastHitbox, lastAutoBat, lastTweenToBrainrot = false, false, false, false, false
 
 TrackConnection(RunService.Heartbeat:Connect(function()
-    local ar = GetAntiRagdoll()
-    local ak = GetAntiKnockback()
-    local wf = GetWalkFling()
-    local ag = GetAutoGrabFunc()
-    local fs = GetFloatSteal()
-    local sb = GetSpeedBoost()
-    local hb = GetHitboxExp()
-    local ab = GetAutoBat()
-    local tb = GetTweenToBrainrot()
+    local ar, ak, wf, ag = GetAntiRagdoll(), GetAntiKnockback(), GetWalkFling(), GetAutoGrabFunc()
+    local fs, sb, hb, ab, tb = GetFloatSteal(), GetSpeedBoost(), GetHitboxExp(), GetAutoBat(), GetTweenToBrainrot()
 
     if ar ~= lastAntiRagdoll then
         if ar then EnableAntiRagdoll() else DisableAntiRagdoll() end
         lastAntiRagdoll = ar
     end
-
     if ak ~= lastAntiKnockback then
         if ak then EnableAntiKnockback() else DisableAntiKnockback() end
         lastAntiKnockback = ak
     end
-
     if wf ~= lastWalkFling then
-        if wf then
-            if TweenToBrainrotEnabled then
-                SetWalkFling(false)
-            else
-                StartWalkFling()
-            end
-        else
-            KillWalkFling()
-        end
+        if wf and not TweenToBrainrotEnabled then StartWalkFling() else KillWalkFling() end
         lastWalkFling = wf
     end
-
     if ag ~= lastAutoGrab then
         AutoGrabEnabled = ag
-        if not ag then
-            GrabStartTime = 0
-            CurrentGrabPrompt = nil
-            StatusLabel.Text = "Disabled"
-            StatusLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
-            ProgFill.Size = UDim2.new(0, 0, 1, 0)
-            ProgPercent.Text = "0%"
-        else
-            GrabStartTime = 0
-            CurrentGrabPrompt = nil
-            StatusLabel.Text = "Searching..."
-            StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-        end
+        GrabStartTime = 0
+        CurrentGrabPrompt = nil
+        StatusLabel.Text = ag and "Searching..." or "Disabled"
+        StatusLabel.TextColor3 = ag and Color3.fromRGB(150, 150, 150) or Color3.fromRGB(255, 60, 60)
+        ProgFill.Size = UDim2.new(0, 0, 1, 0)
+        ProgPercent.Text = "0%"
         lastAutoGrab = ag
     end
-
     if fs ~= lastFloatSteal then
         FloatStealEnabled = fs
         if not fs then StopFloat() end
         lastFloatSteal = fs
     end
-
     if sb ~= lastSpeedBoost then
         SpeedBoostEnabled = sb
         SpeedFrame.Visible = sb
         lastSpeedBoost = sb
     end
-
     if hb ~= lastHitbox then
         UpdateHitboxExpander(hb)
         lastHitbox = hb
     end
-
     if ab ~= lastAutoBat then
         AutoBatEnabled = ab
         lastAutoBat = ab
     end
-
     if tb ~= lastTweenToBrainrot then
-        TweenToBrainrotEnabled = tb
-        if tb then StartTweenToBrainrot() else StopTweenToBrainrot() end
+        TweenFrame.Visible = tb or TweenToBrainrotEnabled
+        if tb and not TweenToBrainrotEnabled then
+            StartTweenToBrainrot()
+        elseif not tb and TweenToBrainrotEnabled then
+            StopTweenToBrainrot()
+        end
         lastTweenToBrainrot = tb
     end
 end))
@@ -1227,10 +1217,6 @@ local function FullCleanup()
     StopTweenToBrainrot()
     UpdateHitboxExpander(false)
     if FloatPlatform then FloatPlatform:Destroy() FloatPlatform = nil end
-    AutoGrabEnabled = false
-    SpeedBoostEnabled = false
-    AutoBatEnabled = false
-    FloatStealEnabled = false
 end
 
 CloseButton.MouseButton1Click:Connect(function()

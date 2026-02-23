@@ -70,7 +70,7 @@ local AntiKnockbackActive = false
 local AntiKnockbackConnection = nil
 local HitboxConnection = nil
 
-local MaxHorizontalSpeed = 45
+local MaxHorizontalSpeed = 60
 local MaxVerticalSpeed = 15
 
 local BlockedStates = {
@@ -733,6 +733,10 @@ local function EnableAntiKnockback()
         
         local state = humanoid:GetState()
         if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll then
+            return
+        end
+        
+        if getgenv().TweenPanelRunning then
             return
         end
         

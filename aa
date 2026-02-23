@@ -13,6 +13,9 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
+local PlayerModule = require(LocalPlayer:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule"))
+local Controls = PlayerModule:GetControls()
+
 local SaveFileName = "SchmecktPvP_Settings.json"
 local AllConnections = {}
 
@@ -61,11 +64,20 @@ local CollisionConnection = nil
 
 local AntiRagdollActive = false
 local AntiRagdollConnections = {}
-local trackedMotors = {}
+local Frozen = false
 
 local AntiKnockbackActive = false
 local AntiKnockbackConnection = nil
 local HitboxConnection = nil
+
+local MaxHorizontalSpeed = 45
+local MaxVerticalSpeed = 15
+
+local BlockedStates = {
+    [Enum.HumanoidStateType.Ragdoll] = true,
+    [Enum.HumanoidStateType.FallingDown] = true,
+    [Enum.HumanoidStateType.Physics] = true,
+}
 
 local FloatStealEnabled = false
 local FloatPlatform = nil
@@ -128,7 +140,6 @@ local function GetRealGroundY(hrp)
     local filterList = {LocalPlayer.Character}
     if FloatPlatform then table.insert(filterList, FloatPlatform) end
     rayParams.FilterDescendantsInstances = filterList
-    
     local result = Workspace:Raycast(hrp.Position, Vector3.new(0, -200, 0), rayParams)
     if result then
         return result.Position.Y
@@ -340,12 +351,10 @@ local GetWalkFlingFunc, SetWalkFlingFunc = CreateToggle(MainFrame, "WalkFling [Q
 GetWalkFling = GetWalkFlingFunc
 SetWalkFling = SetWalkFlingFunc
 
--- Auto Grab: IMMER deaktiviert starten (forceDefault = true)
 local GetAutoGrabFuncTemp, SetAutoGrabFunc = CreateToggle(MainFrame, "Auto Grab", 162, nil, false, true)
 GetAutoGrabFunc = GetAutoGrabFuncTemp
 SetAutoGrab = SetAutoGrabFunc
 
--- SetAutoGrab global verfügbar machen für Tween Panel
 getgenv().SchmecktSetAutoGrab = SetAutoGrab
 getgenv().SchmecktGetAutoGrab = GetAutoGrabFunc
 
@@ -572,65 +581,183 @@ local function StartWalkFling()
     end)
 end
 
+local function ForceNormal(character)
+    local hum = character:FindFirstChildOfClass("Humanoid")
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hum or not hrp then return end
+    
+    hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+    
+    if not Frozen then
+        Frozen = true
+        hrp.Anchored = true
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+        hrp.CFrame = hrp.CFrame + Vector3.new(0, 1.5, 0)
+    end
+end
+
+local function Release(character)
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if hrp and Frozen then
+        hrp.Anchored = false
+        Frozen = false
+    end
+end
+
+local function RestoreMotors(character)
+    for _, v in ipairs(character:GetDescendants()) do
+        if v:IsA("Motor6D") then
+            v.Enabled = true
+        elseif v:IsA("BallSocketConstraint") or v:IsA("HingeConstraint") or v:IsA("RodConstraint") then
+            v.Enabled = false
+            pcall(function() v:Destroy() end)
+        end
+    end
+end
+
 local function EnableAntiRagdoll()
     if AntiRagdollActive then return end
     AntiRagdollActive = true
-    local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local humanoid = character:WaitForChild("Humanoid")
-
-    local function WatchMotor(motor)
-        if not motor:IsA("Motor6D") or trackedMotors[motor] then return end
-        trackedMotors[motor] = true
-        table.insert(AntiRagdollConnections, motor:GetPropertyChangedSignal("Enabled"):Connect(function()
-            if not motor.Enabled then motor.Enabled = true end
-        end))
-        motor.Enabled = true
+    
+    local character = LocalPlayer.Character
+    if not character then
+        character = LocalPlayer.CharacterAdded:Wait()
     end
-
-    for _, desc in ipairs(character:GetDescendants()) do WatchMotor(desc) end
-    table.insert(AntiRagdollConnections, character.DescendantAdded:Connect(WatchMotor))
-
-    table.insert(AntiRagdollConnections, RunService.Heartbeat:Connect(function()
-        for _, obj in pairs(character:GetDescendants()) do
-            if obj:IsA("BallSocketConstraint") or obj:IsA("NoCollisionConstraint") or obj:IsA("HingeConstraint") then
-                obj:Destroy()
-            end
+    local humanoid = character:WaitForChild("Humanoid", 10)
+    if not humanoid then return end
+    
+    for state in pairs(BlockedStates) do
+        humanoid:SetStateEnabled(state, false)
+    end
+    
+    Controls:Enable()
+    
+    local stateConn = humanoid.StateChanged:Connect(function(_, newState)
+        if not AntiRagdollActive then return end
+        if BlockedStates[newState] then
+            ForceNormal(character)
+            RestoreMotors(character)
+            Controls:Enable()
         end
-        local state = humanoid:GetState()
-        if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll or state == Enum.HumanoidStateType.FallingDown then
-            humanoid:ChangeState(Enum.HumanoidStateType.Running)
+    end)
+    table.insert(AntiRagdollConnections, stateConn)
+    
+    local steppedConn = RunService.Stepped:Connect(function()
+        if not AntiRagdollActive then
+            Release(character)
+            return
         end
-    end))
-
-    table.insert(AntiRagdollConnections, LocalPlayer.CharacterAdded:Connect(function(newChar)
-        humanoid = newChar:WaitForChild("Humanoid")
-        trackedMotors = {}
-    end))
+        
+        character = LocalPlayer.Character
+        if not character then return end
+        
+        humanoid = character:FindFirstChildOfClass("Humanoid")
+        if not humanoid then return end
+        
+        if BlockedStates[humanoid:GetState()] then
+            ForceNormal(character)
+            RestoreMotors(character)
+        else
+            Release(character)
+        end
+        
+        for state in pairs(BlockedStates) do
+            humanoid:SetStateEnabled(state, false)
+        end
+    end)
+    table.insert(AntiRagdollConnections, steppedConn)
+    
+    local descConn = character.DescendantAdded:Connect(function(desc)
+        if not AntiRagdollActive then return end
+        if desc:IsA("BallSocketConstraint") or desc:IsA("HingeConstraint") or desc:IsA("RodConstraint") then
+            desc.Enabled = false
+            pcall(function() desc:Destroy() end)
+        end
+        if desc:IsA("Motor6D") then
+            desc.Enabled = true
+        end
+    end)
+    table.insert(AntiRagdollConnections, descConn)
+    
+    local charAddedConn = LocalPlayer.CharacterAdded:Connect(function(newChar)
+        Frozen = false
+        character = newChar
+        humanoid = newChar:WaitForChild("Humanoid", 10)
+        if not humanoid then return end
+        
+        task.wait(0.1)
+        
+        for state in pairs(BlockedStates) do
+            humanoid:SetStateEnabled(state, false)
+        end
+        
+        Controls:Enable()
+    end)
+    table.insert(AntiRagdollConnections, charAddedConn)
 end
 
 local function DisableAntiRagdoll()
     AntiRagdollActive = false
-    for _, conn in pairs(AntiRagdollConnections) do conn:Disconnect() end
+    
+    local character = LocalPlayer.Character
+    if character then
+        Release(character)
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            for state in pairs(BlockedStates) do
+                humanoid:SetStateEnabled(state, true)
+            end
+        end
+    end
+    
+    for _, conn in pairs(AntiRagdollConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
     AntiRagdollConnections = {}
-    trackedMotors = {}
 end
 
 local function EnableAntiKnockback()
     if AntiKnockbackActive then return end
     AntiKnockbackActive = true
+    
     AntiKnockbackConnection = RunService.Heartbeat:Connect(function()
+        if not AntiKnockbackActive then return end
+        
         local character = LocalPlayer.Character
         if not character then return end
+        
         local hrp = character:FindFirstChild("HumanoidRootPart")
         local humanoid = character:FindFirstChild("Humanoid")
         if not hrp or not humanoid then return end
+        
         local state = humanoid:GetState()
-        if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll then return end
+        if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll then
+            return
+        end
+        
         local vel = hrp.AssemblyLinearVelocity
-        local hs = Vector3.new(vel.X, 0, vel.Z).Magnitude
-        if hs > 50 then
-            local dir = Vector3.new(vel.X, 0, vel.Z).Unit
-            hrp.AssemblyLinearVelocity = Vector3.new(dir.X * 50, vel.Y, dir.Z * 50)
+        local horizontalVel = Vector3.new(vel.X, 0, vel.Z)
+        local horizontalSpeed = horizontalVel.Magnitude
+        local verticalSpeed = vel.Y
+        
+        local needsClamp = false
+        local newX, newY, newZ = vel.X, vel.Y, vel.Z
+        
+        if horizontalSpeed > MaxHorizontalSpeed then
+            needsClamp = true
+            local dir = horizontalVel.Unit
+            newX = dir.X * MaxHorizontalSpeed
+            newZ = dir.Z * MaxHorizontalSpeed
+        end
+        
+        if verticalSpeed > MaxVerticalSpeed then
+            needsClamp = true
+            newY = MaxVerticalSpeed
+        end
+        
+        if needsClamp then
+            hrp.AssemblyLinearVelocity = Vector3.new(newX, newY, newZ)
         end
     end)
 end
@@ -693,8 +820,6 @@ local function StartFloat()
     
     IsCurrentlyFloating = true
     OriginalGroundY = GetRealGroundY(hrp)
-    
-    local currentHeight = GetCurrentFloatHeight(hrp)
     
     if FloatPlatform then FloatPlatform:Destroy() end
     FloatPlatform = Instance.new("Part")
@@ -911,7 +1036,6 @@ TrackConnection(RunService.Heartbeat:Connect(function()
             ProgFill.Size = UDim2.new(1, 0, 1, 0)
             ProgPercent.Text = "100%"
             
-            -- NACH ERFOLGREICHEM GRAB: Auto Grab deaktivieren
             task.delay(0.2, function()
                 SetAutoGrab(false)
                 ProgFill.Size = UDim2.new(0, 0, 1, 0)
@@ -1020,7 +1144,6 @@ local function FullCleanup()
             game.CoreGui:FindFirstChild("TweenPanel"):Destroy()
         end
     end)
-    -- Cleanup global functions
     getgenv().SchmecktSetAutoGrab = nil
     getgenv().SchmecktGetAutoGrab = nil
 end
@@ -1031,6 +1154,7 @@ CloseButton.MouseButton1Click:Connect(function()
 end)
 
 TrackConnection(LocalPlayer.CharacterAdded:Connect(function()
+    Frozen = false
     StopFloat()
     FloatStealStartTime = 0
     OriginalGroundY = nil

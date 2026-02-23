@@ -261,7 +261,7 @@ CloseButton.Size = UDim2.new(0, 30 * ScaleFactor, 0, 30 * ScaleFactor)
 CloseButton.Position = UDim2.new(1, -32 * ScaleFactor, 0, 1 * ScaleFactor)
 CloseButton.Parent = TopBar
 
-local function CreateToggle(parent, text, yPos, settingKey, defaultState)
+local function CreateToggle(parent, text, yPos, settingKey, defaultState, forceDefault)
     local Container = Instance.new("Frame", parent)
     Container.Size = UDim2.new(1, -20 * ScaleFactor, 0, 38 * ScaleFactor)
     Container.Position = UDim2.new(0, 10 * ScaleFactor, 0, yPos * ScaleFactor)
@@ -293,7 +293,12 @@ local function CreateToggle(parent, text, yPos, settingKey, defaultState)
     Separator.Position = UDim2.new(0, 10 * ScaleFactor, 0, (yPos + 38) * ScaleFactor)
     Separator.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
 
-    local toggled = (settingKey and SavedSettings[settingKey] ~= nil) and SavedSettings[settingKey] or defaultState or false
+    local toggled
+    if forceDefault then
+        toggled = defaultState or false
+    else
+        toggled = (settingKey and SavedSettings[settingKey] ~= nil) and SavedSettings[settingKey] or defaultState or false
+    end
 
     local function updateVisual()
         if toggled then
@@ -310,7 +315,7 @@ local function CreateToggle(parent, text, yPos, settingKey, defaultState)
     local function setToggle(state)
         toggled = state
         updateVisual()
-        if settingKey then
+        if settingKey and not forceDefault then
             SavedSettings[settingKey] = toggled
             SaveSettings(SavedSettings)
         end
@@ -334,9 +339,16 @@ GetAntiKnockback = GetAntiKnockbackFunc
 local GetWalkFlingFunc, SetWalkFlingFunc = CreateToggle(MainFrame, "WalkFling [Q]", 122, nil, false)
 GetWalkFling = GetWalkFlingFunc
 SetWalkFling = SetWalkFlingFunc
-local GetAutoGrabFuncTemp, SetAutoGrabFunc = CreateToggle(MainFrame, "Auto Grab", 162, "AutoGrab", false)
+
+-- Auto Grab: IMMER deaktiviert starten (forceDefault = true)
+local GetAutoGrabFuncTemp, SetAutoGrabFunc = CreateToggle(MainFrame, "Auto Grab", 162, nil, false, true)
 GetAutoGrabFunc = GetAutoGrabFuncTemp
 SetAutoGrab = SetAutoGrabFunc
+
+-- SetAutoGrab global verfügbar machen für Tween Panel
+getgenv().SchmecktSetAutoGrab = SetAutoGrab
+getgenv().SchmecktGetAutoGrab = GetAutoGrabFunc
+
 local GetFloatStealFunc, SetFloatSteal = CreateToggle(MainFrame, "Smart Float", 202, "SmartFloat", false)
 GetFloatSteal = GetFloatStealFunc
 local GetSpeedBoostFunc, SetSpeedBoost = CreateToggle(MainFrame, "Speed Boost", 242, "SpeedBoost", false)
@@ -382,8 +394,8 @@ StatusLabel = Instance.new("TextLabel")
 StatusLabel.Size = UDim2.new(0, 80 * ScaleFactor, 1, 0)
 StatusLabel.Position = UDim2.new(0, 48 * ScaleFactor, 0, 0)
 StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "Idle"
-StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+StatusLabel.Text = "Disabled"
+StatusLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
 StatusLabel.Font = Enum.Font.GothamBold
 StatusLabel.TextSize = 10 * ScaleFactor
 StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -899,13 +911,13 @@ TrackConnection(RunService.Heartbeat:Connect(function()
             ProgFill.Size = UDim2.new(1, 0, 1, 0)
             ProgPercent.Text = "100%"
             
-            task.delay(0.15, function()
-                if not CurrentGrabPrompt then
-                    ProgFill.Size = UDim2.new(0, 0, 1, 0)
-                    ProgPercent.Text = "0%"
-                    StatusLabel.Text = "Searching..."
-                    StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-                end
+            -- NACH ERFOLGREICHEM GRAB: Auto Grab deaktivieren
+            task.delay(0.2, function()
+                SetAutoGrab(false)
+                ProgFill.Size = UDim2.new(0, 0, 1, 0)
+                ProgPercent.Text = "0%"
+                StatusLabel.Text = "Disabled"
+                StatusLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
             end)
             
             CurrentGrabPrompt = nil
@@ -1008,6 +1020,9 @@ local function FullCleanup()
             game.CoreGui:FindFirstChild("TweenPanel"):Destroy()
         end
     end)
+    -- Cleanup global functions
+    getgenv().SchmecktSetAutoGrab = nil
+    getgenv().SchmecktGetAutoGrab = nil
 end
 
 CloseButton.MouseButton1Click:Connect(function()

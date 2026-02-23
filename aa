@@ -70,13 +70,15 @@ local HitboxConnection = nil
 local FloatStealEnabled = false
 local FloatPlatform = nil
 local FloatConnection = nil
-local FloatHeight = 13
-local FloatSpeed = 0.3
 local IsCurrentlyFloating = false
-local FloatTargetY = 0
+local FloatStealStartTime = 0
+local OriginalGroundY = nil
+
+local FloatHeight = 13
+local FloatHeightNearBase = 11
+local BaseProximityRange = 20
 local SmartFloatRange = 30
 local FloatStartDelay = 0.5
-local FloatStealStartTime = 0
 
 local SpeedBoostEnabled = false
 local NormalSpeed = SavedSettings.NormalSpeed or 57
@@ -89,15 +91,57 @@ local SetWalkFling, SetTweenPanel, SetAutoGrab
 local GetWalkFling, GetTweenPanel, GetAutoGrabFunc, GetFloatSteal, GetSpeedBoost, GetHitboxExp, GetAutoBat, GetAntiRagdoll, GetAntiKnockback
 local ScreenGui, StatusLabel, ProgFill, ProgPercent, SpeedFrame, SpeedStatusLabel
 
-local function GetGroundY(hrp)
+local function GetMyPlot()
+    local plots = Workspace:FindFirstChild("Plots")
+    if not plots then return nil end
+    for _, plot in pairs(plots:GetChildren()) do
+        for _, obj in pairs(plot:GetDescendants()) do
+            if obj:IsA("TextLabel") and obj.Text then
+                if obj.Text:find(LocalPlayer.Name) or obj.Text:find(LocalPlayer.DisplayName) then
+                    return plot
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function GetMyAnimalTarget()
+    local myPlot = GetMyPlot()
+    if not myPlot then return nil end
+    local animalTarget = myPlot:FindFirstChild("AnimalTarget")
+    if animalTarget and animalTarget:IsA("BasePart") then
+        return animalTarget.Position
+    end
+    return nil
+end
+
+local function GetDistanceToBase(hrp)
+    local basePos = GetMyAnimalTarget()
+    if not basePos then return math.huge end
+    return (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(basePos.X, 0, basePos.Z)).Magnitude
+end
+
+local function GetRealGroundY(hrp)
     local rayParams = RaycastParams.new()
     rayParams.FilterType = Enum.RaycastFilterType.Exclude
-    rayParams.FilterDescendantsInstances = {LocalPlayer.Character}
-    local result = Workspace:Raycast(hrp.Position, Vector3.new(0, -100, 0), rayParams)
+    local filterList = {LocalPlayer.Character}
+    if FloatPlatform then table.insert(filterList, FloatPlatform) end
+    rayParams.FilterDescendantsInstances = filterList
+    
+    local result = Workspace:Raycast(hrp.Position, Vector3.new(0, -200, 0), rayParams)
     if result then
         return result.Position.Y
     end
     return hrp.Position.Y - 3
+end
+
+local function GetCurrentFloatHeight(hrp)
+    local distToBase = GetDistanceToBase(hrp)
+    if distToBase <= BaseProximityRange then
+        return FloatHeightNearBase
+    end
+    return FloatHeight
 end
 
 local function ShowVersionSelector()
@@ -584,11 +628,7 @@ local function DisableAntiKnockback()
     if AntiKnockbackConnection then AntiKnockbackConnection:Disconnect() AntiKnockbackConnection = nil end
 end
 
-local function GetNearestPlayerDistance()
-    local character = LocalPlayer.Character
-    if not character then return math.huge end
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return math.huge end
+local function GetNearestPlayerDistance(hrp)
     local minDist = math.huge
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character then
@@ -634,14 +674,15 @@ end
 
 local function StartFloat()
     if IsCurrentlyFloating then return end
-    IsCurrentlyFloating = true
     local character = LocalPlayer.Character
     if not character then return end
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     
-    local groundY = GetGroundY(hrp)
-    FloatTargetY = groundY + FloatHeight
+    IsCurrentlyFloating = true
+    OriginalGroundY = GetRealGroundY(hrp)
+    
+    local currentHeight = GetCurrentFloatHeight(hrp)
     
     if FloatPlatform then FloatPlatform:Destroy() end
     FloatPlatform = Instance.new("Part")
@@ -651,28 +692,47 @@ local function StartFloat()
     FloatPlatform.Transparency = 1
     FloatPlatform.Name = "FloatPlatform"
     FloatPlatform.Parent = Workspace
-    FloatPlatform.Position = Vector3.new(hrp.Position.X, math.min(hrp.Position.Y - 3, FloatTargetY - 3), hrp.Position.Z)
-    
-    local riseSpeed = FloatHeight / FloatSpeed
+    FloatPlatform.Position = Vector3.new(hrp.Position.X, hrp.Position.Y - 3, hrp.Position.Z)
     
     FloatConnection = RunService.Heartbeat:Connect(function(dt)
-        if not IsCurrentlyFloating or not FloatPlatform or not FloatPlatform.Parent or not hrp or not hrp.Parent then return end
+        if not IsCurrentlyFloating then return end
+        if not FloatPlatform or not FloatPlatform.Parent then return end
+        
+        local character = LocalPlayer.Character
+        if not character then return end
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        
+        local targetHeight = GetCurrentFloatHeight(hrp)
+        local targetPlatformY = OriginalGroundY + targetHeight - 3
         local currentY = FloatPlatform.Position.Y
-        local targetPlatformY = FloatTargetY - 3
-        if currentY < targetPlatformY then
-            FloatPlatform.Position = Vector3.new(hrp.Position.X, math.min(currentY + dt * riseSpeed, targetPlatformY), hrp.Position.Z)
+        local diff = targetPlatformY - currentY
+        
+        local moveSpeed = 40
+        
+        local newY
+        if math.abs(diff) < 0.1 then
+            newY = targetPlatformY
         else
-            FloatPlatform.Position = Vector3.new(hrp.Position.X, targetPlatformY, hrp.Position.Z)
+            local step = math.sign(diff) * math.min(math.abs(diff), dt * moveSpeed)
+            newY = currentY + step
         end
+        
+        FloatPlatform.Position = Vector3.new(hrp.Position.X, newY, hrp.Position.Z)
     end)
 end
 
 local function StopFloat()
-    if not IsCurrentlyFloating then return end
     IsCurrentlyFloating = false
-    FloatTargetY = 0
-    if FloatConnection then FloatConnection:Disconnect() FloatConnection = nil end
-    if FloatPlatform then FloatPlatform:Destroy() FloatPlatform = nil end
+    OriginalGroundY = nil
+    if FloatConnection then 
+        FloatConnection:Disconnect() 
+        FloatConnection = nil 
+    end
+    if FloatPlatform then 
+        FloatPlatform:Destroy() 
+        FloatPlatform = nil 
+    end
 end
 
 local function UpdateHitboxExpander(enabled)
@@ -772,7 +832,7 @@ task.spawn(function()
         if not humanoid or not hrp then continue end
         
         local isStealing = humanoid.WalkSpeed <= 25
-        local playerNearby = GetNearestPlayerDistance() <= SmartFloatRange
+        local playerNearby = GetNearestPlayerDistance(hrp) <= SmartFloatRange
         
         if isStealing and FloatStealStartTime == 0 then
             FloatStealStartTime = tick()
@@ -780,10 +840,10 @@ task.spawn(function()
             FloatStealStartTime = 0
         end
         
-        local canFloat = FloatStealStartTime > 0 and (tick() - FloatStealStartTime) >= FloatStartDelay
-        local shouldBeFloating = isStealing and playerNearby and canFloat
+        local delayPassed = FloatStealStartTime > 0 and (tick() - FloatStealStartTime) >= FloatStartDelay
+        local shouldFloat = isStealing and playerNearby and delayPassed
         
-        if shouldBeFloating then
+        if shouldFloat then
             if IsCurrentlyFloating and FloatPlatform and FloatPlatform.Parent then
                 local platformY = FloatPlatform.Position.Y
                 local myY = hrp.Position.Y
@@ -958,7 +1018,7 @@ end)
 TrackConnection(LocalPlayer.CharacterAdded:Connect(function()
     StopFloat()
     FloatStealStartTime = 0
-    FloatTargetY = 0
+    OriginalGroundY = nil
     GrabStartTime = 0
     CurrentGrabPrompt = nil
 end))

@@ -11,6 +11,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local HttpService = game:GetService("HttpService")
+local Lighting = game:GetService("Lighting")
 local LocalPlayer = Players.LocalPlayer
 
 local PlayerModule = require(LocalPlayer:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule"))
@@ -18,6 +19,8 @@ local Controls = PlayerModule:GetControls()
 
 local SaveFileName = "SchmecktPvP_Settings.json"
 local AllConnections = {}
+local AllKeybinds = {}
+local ListeningForKeybind = nil
 
 local function TrackConnection(conn)
     table.insert(AllConnections, conn)
@@ -64,20 +67,14 @@ local CollisionConnection = nil
 
 local AntiRagdollActive = false
 local AntiRagdollConnections = {}
-local Frozen = false
 
 local AntiKnockbackActive = false
 local AntiKnockbackConnection = nil
 local HitboxConnection = nil
+local IsJumping = false
 
 local MaxHorizontalSpeed = 60
-local MaxVerticalSpeed = 15
-
-local BlockedStates = {
-    [Enum.HumanoidStateType.Ragdoll] = true,
-    [Enum.HumanoidStateType.FallingDown] = true,
-    [Enum.HumanoidStateType.Physics] = true,
-}
+local MaxVerticalKnockback = 50
 
 local FloatStealEnabled = false
 local FloatPlatform = nil
@@ -99,8 +96,26 @@ local StealSpeed = SavedSettings.StealSpeed or 29.5
 local AutoBatEnabled = false
 local BatSpamDelay = 0.05
 
-local SetWalkFling, SetTweenPanel, SetAutoGrab
-local GetWalkFling, GetTweenPanel, GetAutoGrabFunc, GetFloatSteal, GetSpeedBoost, GetHitboxExp, GetAutoBat, GetAntiRagdoll, GetAntiKnockback
+local UnwalkEnabled = false
+local UnwalkConnections = {}
+
+local TargetPlayerEnabled = false
+local TargetPlayerConn = nil
+
+local InfJumpEnabled = false
+local InfJumpConn = nil
+local InfFallConn = nil
+local JumpForce = 50
+local ClampFallSpeed = 80
+
+local XrayEnabled = false
+local XrayActive = false
+local OriginalTransparency = {}
+
+local lastVelocity = Vector3.new(0, 0, 0)
+
+local SetWalkFling, SetTweenPanel, SetAutoGrab, SetUnwalk, SetTargetPlayer, SetInfJump, SetXray
+local GetWalkFling, GetTweenPanel, GetAutoGrabFunc, GetFloatSteal, GetSpeedBoost, GetHitboxExp, GetAutoBat, GetAntiRagdoll, GetAntiKnockback, GetUnwalk, GetTargetPlayer, GetInfJump, GetXray
 local ScreenGui, StatusLabel, ProgFill, ProgPercent, SpeedFrame, SpeedStatusLabel
 
 local function GetMyPlot()
@@ -153,6 +168,182 @@ local function GetCurrentFloatHeight(hrp)
         return FloatHeightNearBase
     end
     return FloatHeight
+end
+
+local function DisableAnimations()
+    local character = LocalPlayer.Character
+    if not character then return end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    local animator = humanoid:FindFirstChildOfClass("Animator")
+    if animator then
+        for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+            track:Stop()
+        end
+        animator:Destroy()
+    end
+    local animate = character:FindFirstChild("Animate")
+    if animate then
+        animate:Destroy()
+    end
+    for _, desc in ipairs(character:GetDescendants()) do
+        if desc:IsA("Animation") or desc:IsA("AnimationTrack") then
+            pcall(function() desc:Destroy() end)
+        end
+    end
+end
+
+local function EnableUnwalk()
+    if UnwalkEnabled then return end
+    UnwalkEnabled = true
+    DisableAnimations()
+    local charAddedConn = LocalPlayer.CharacterAdded:Connect(function(char)
+        task.wait(0.5)
+        if UnwalkEnabled then
+            DisableAnimations()
+        end
+    end)
+    table.insert(UnwalkConnections, charAddedConn)
+end
+
+local function DisableUnwalk()
+    UnwalkEnabled = false
+    for _, conn in pairs(UnwalkConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    UnwalkConnections = {}
+end
+
+local function findBat()
+    local c = LocalPlayer.Character
+    if not c then return nil end
+    local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
+    local SlapList = {"Bat","Slap","Iron Slap","Gold Slap","Diamond Slap","Emerald Slap","Ruby Slap","Dark Matter Slap","Flame Slap","Nuclear Slap","Galaxy Slap","Glitched Slap"}
+    for _, ch in ipairs(c:GetChildren()) do
+        if ch:IsA("Tool") and ch.Name:lower():find("bat") then return ch end
+    end
+    if bp then
+        for _, ch in ipairs(bp:GetChildren()) do
+            if ch:IsA("Tool") and ch.Name:lower():find("bat") then return ch end
+        end
+    end
+    for _, name in ipairs(SlapList) do
+        local t = c:FindFirstChild(name) or (bp and bp:FindFirstChild(name))
+        if t then return t end
+    end
+    return nil
+end
+
+local function findNearestEnemy()
+    local c = LocalPlayer.Character
+    if not c then return nil, nil, nil end
+    local myHRP = c:FindFirstChild("HumanoidRootPart")
+    if not myHRP then return nil, nil, nil end
+    local nearest, nearestDist, nearestTorso = nil, math.huge, nil
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local eh = p.Character:FindFirstChild("HumanoidRootPart")
+            local torso = p.Character:FindFirstChild("UpperTorso") or p.Character:FindFirstChild("Torso")
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            if eh and hum and hum.Health > 0 then
+                local d = (eh.Position - myHRP.Position).Magnitude
+                if d < nearestDist then nearestDist = d; nearest = eh; nearestTorso = torso or eh end
+            end
+        end
+    end
+    return nearest, nearestDist, nearestTorso
+end
+
+local function StartTargetPlayer()
+    if TargetPlayerConn then return end
+    TargetPlayerConn = RunService.Heartbeat:Connect(function()
+        if not TargetPlayerEnabled then return end
+        local c = LocalPlayer.Character
+        if not c then return end
+        local h = c:FindFirstChild("HumanoidRootPart")
+        local hum = c:FindFirstChildOfClass("Humanoid")
+        if not h or not hum then return end
+        local bat = findBat()
+        if bat and bat.Parent ~= c then pcall(function() hum:EquipTool(bat) end) end
+        local target, _, torso = findNearestEnemy()
+        if target and torso then
+            local dir = torso.Position - h.Position
+            local flatDir = Vector3.new(dir.X, 0, dir.Z)
+            if flatDir.Magnitude > 1.5 then
+                local moveDir = flatDir.Unit
+                h.AssemblyLinearVelocity = Vector3.new(moveDir.X*55, h.AssemblyLinearVelocity.Y, moveDir.Z*55)
+            else
+                local tv = target.AssemblyLinearVelocity
+                h.AssemblyLinearVelocity = Vector3.new(tv.X, h.AssemblyLinearVelocity.Y, tv.Z)
+            end
+            if bat then pcall(function() bat:Activate() end) end
+        end
+    end)
+end
+
+local function StopTargetPlayer()
+    if TargetPlayerConn then TargetPlayerConn:Disconnect(); TargetPlayerConn = nil end
+end
+
+local function EnableInfJump()
+    if InfJumpConn then InfJumpConn:Disconnect(); InfJumpConn = nil end
+    if InfFallConn then InfFallConn:Disconnect(); InfFallConn = nil end
+    if not InfJumpEnabled then return end
+    InfFallConn = RunService.Heartbeat:Connect(function()
+        if not InfJumpEnabled then return end
+        local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if root and root.AssemblyLinearVelocity.Y < -ClampFallSpeed then
+            root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, -ClampFallSpeed, root.AssemblyLinearVelocity.Z)
+        end
+    end)
+    InfJumpConn = UserInputService.JumpRequest:Connect(function()
+        if not InfJumpEnabled then return end
+        local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if root then
+            root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, JumpForce, root.AssemblyLinearVelocity.Z)
+        end
+    end)
+end
+
+local function DisableInfJump()
+    if InfJumpConn then InfJumpConn:Disconnect(); InfJumpConn = nil end
+    if InfFallConn then InfFallConn:Disconnect(); InfFallConn = nil end
+end
+
+local function EnableXray()
+    if getgenv and getgenv().OPTIMIZER_ACTIVE then return end
+    if getgenv then getgenv().OPTIMIZER_ACTIVE = true end
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+        Lighting.GlobalShadows = false; Lighting.Brightness = 3; Lighting.FogEnd = 9e9
+    end)
+    pcall(function()
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            pcall(function()
+                if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") then obj:Destroy() end
+                if obj:IsA("BasePart") then obj.CastShadow = false; obj.Material = Enum.Material.Plastic end
+            end)
+        end
+    end)
+    XrayActive = true
+    pcall(function()
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj:IsA("BasePart") and obj.Anchored and (obj.Name:lower():find("base") or (obj.Parent and obj.Parent.Name:lower():find("base"))) then
+                OriginalTransparency[obj] = obj.LocalTransparencyModifier
+                obj.LocalTransparencyModifier = 0.85
+            end
+        end
+    end)
+end
+
+local function DisableXray()
+    if getgenv then getgenv().OPTIMIZER_ACTIVE = false end
+    if XrayActive then
+        for part, val in pairs(OriginalTransparency) do
+            if part then part.LocalTransparencyModifier = val end
+        end
+        OriginalTransparency = {}; XrayActive = false
+    end
 end
 
 local function ShowVersionSelector()
@@ -233,8 +424,8 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = game.CoreGui
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 260 * ScaleFactor, 0, 400 * ScaleFactor)
-MainFrame.Position = UDim2.new(1, -280 * ScaleFactor, 0, 120 * ScaleFactor)
+MainFrame.Size = UDim2.new(0, 280 * ScaleFactor, 0, 560 * ScaleFactor)
+MainFrame.Position = UDim2.new(1, -300 * ScaleFactor, 0, 120 * ScaleFactor)
 MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
@@ -282,10 +473,30 @@ local function CreateToggle(parent, text, yPos, settingKey, defaultState, forceD
     Label.Text = text
     Label.Font = Enum.Font.GothamBold
     Label.TextColor3 = Color3.fromRGB(255, 255, 255)
-    Label.TextSize = 14 * ScaleFactor
+    Label.TextSize = 12 * ScaleFactor
     Label.BackgroundTransparency = 1
-    Label.Size = UDim2.new(1, -60 * ScaleFactor, 1, 0)
+    Label.Size = UDim2.new(0, 100 * ScaleFactor, 1, 0)
     Label.TextXAlignment = Enum.TextXAlignment.Left
+
+    local KeybindBox = Instance.new("TextButton", Container)
+    KeybindBox.Size = UDim2.new(0, 50 * ScaleFactor, 0, 18 * ScaleFactor)
+    KeybindBox.Position = UDim2.new(0, 105 * ScaleFactor, 0.5, -9 * ScaleFactor)
+    KeybindBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    KeybindBox.BorderSizePixel = 0
+    KeybindBox.Text = ""
+    KeybindBox.TextColor3 = Color3.fromRGB(180, 100, 255)
+    KeybindBox.TextSize = 10 * ScaleFactor
+    KeybindBox.Font = Enum.Font.GothamBold
+    KeybindBox.AutoButtonColor = false
+    Instance.new("UICorner", KeybindBox).CornerRadius = UDim.new(0, 4 * ScaleFactor)
+    local kbStroke = Instance.new("UIStroke", KeybindBox)
+    kbStroke.Color = Color3.fromRGB(60, 60, 60)
+    kbStroke.Thickness = 1
+
+    local keybindKey = settingKey and (settingKey .. "_Keybind") or nil
+    if keybindKey and SavedSettings[keybindKey] then
+        KeybindBox.Text = SavedSettings[keybindKey]
+    end
 
     local SwitchBg = Instance.new("Frame", Container)
     SwitchBg.Size = UDim2.new(0, 36 * ScaleFactor, 0, 18 * ScaleFactor)
@@ -340,18 +551,84 @@ local function CreateToggle(parent, text, yPos, settingKey, defaultState, forceD
         end
     end)
 
+    KeybindBox.MouseButton1Click:Connect(function()
+        if ListeningForKeybind then
+            ListeningForKeybind.box.Text = ListeningForKeybind.original or ""
+            ListeningForKeybind.box.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        end
+        ListeningForKeybind = {
+            box = KeybindBox,
+            original = KeybindBox.Text,
+            settingKey = keybindKey,
+            setToggle = setToggle,
+            getToggle = function() return toggled end
+        }
+        KeybindBox.Text = "..."
+        KeybindBox.BackgroundColor3 = Color3.fromRGB(80, 50, 0)
+    end)
+
+    if keybindKey then
+        AllKeybinds[keybindKey] = {
+            box = KeybindBox,
+            setToggle = setToggle,
+            getToggle = function() return toggled end
+        }
+    end
+
     return function() return toggled end, setToggle
 end
+
+TrackConnection(UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+
+    if ListeningForKeybind then
+        local keyName = input.KeyCode.Name
+        if input.KeyCode == Enum.KeyCode.Escape then
+            ListeningForKeybind.box.Text = ListeningForKeybind.original or ""
+            ListeningForKeybind.box.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+            ListeningForKeybind = nil
+            return
+        end
+        if input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
+            ListeningForKeybind.box.Text = ""
+            ListeningForKeybind.box.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+            if ListeningForKeybind.settingKey then
+                SavedSettings[ListeningForKeybind.settingKey] = nil
+                SaveSettings(SavedSettings)
+            end
+            ListeningForKeybind = nil
+            return
+        end
+        ListeningForKeybind.box.Text = keyName
+        ListeningForKeybind.box.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        if ListeningForKeybind.settingKey then
+            SavedSettings[ListeningForKeybind.settingKey] = keyName
+            SaveSettings(SavedSettings)
+        end
+        ListeningForKeybind = nil
+        return
+    end
+
+    for keybindKey, data in pairs(AllKeybinds) do
+        local savedKey = SavedSettings[keybindKey]
+        if savedKey and savedKey ~= "" then
+            if input.KeyCode.Name == savedKey then
+                data.setToggle(not data.getToggle())
+            end
+        end
+    end
+end))
 
 local GetAntiRagdollFunc, SetAntiRagdoll = CreateToggle(MainFrame, "Anti Ragdoll", 42, "AntiRagdoll", false)
 GetAntiRagdoll = GetAntiRagdollFunc
 local GetAntiKnockbackFunc, SetAntiKnockback = CreateToggle(MainFrame, "Anti Knockback", 82, "AntiKnockback", false)
 GetAntiKnockback = GetAntiKnockbackFunc
-local GetWalkFlingFunc, SetWalkFlingFunc = CreateToggle(MainFrame, "WalkFling [Q]", 122, nil, false)
+local GetWalkFlingFunc, SetWalkFlingFunc = CreateToggle(MainFrame, "WalkFling", 122, "WalkFling", false)
 GetWalkFling = GetWalkFlingFunc
 SetWalkFling = SetWalkFlingFunc
 
-local GetAutoGrabFuncTemp, SetAutoGrabFunc = CreateToggle(MainFrame, "Auto Grab", 162, nil, false, true)
+local GetAutoGrabFuncTemp, SetAutoGrabFunc = CreateToggle(MainFrame, "Auto Grab", 162, "AutoGrab", false, true)
 GetAutoGrabFunc = GetAutoGrabFuncTemp
 SetAutoGrab = SetAutoGrabFunc
 
@@ -362,21 +639,25 @@ local GetFloatStealFunc, SetFloatSteal = CreateToggle(MainFrame, "Smart Float", 
 GetFloatSteal = GetFloatStealFunc
 local GetSpeedBoostFunc, SetSpeedBoost = CreateToggle(MainFrame, "Speed Boost", 242, "SpeedBoost", false)
 GetSpeedBoost = GetSpeedBoostFunc
-local GetHitboxExpFunc, SetHitboxExp = CreateToggle(MainFrame, "Hitbox Expander", 282, "HitboxExpander", false)
+local GetHitboxExpFunc, SetHitboxExp = CreateToggle(MainFrame, "Hitbox Exp", 282, "HitboxExpander", false)
 GetHitboxExp = GetHitboxExpFunc
 local GetAutoBatFunc, SetAutoBat = CreateToggle(MainFrame, "Auto Bat", 322, "AutoBat", false)
 GetAutoBat = GetAutoBatFunc
-local GetTweenPanelFunc, SetTweenPanelFunc = CreateToggle(MainFrame, "Tween Panel", 362, nil, false)
+local GetUnwalkFunc, SetUnwalkFunc = CreateToggle(MainFrame, "Unwalk", 362, "Unwalk", false)
+GetUnwalk = GetUnwalkFunc
+SetUnwalk = SetUnwalkFunc
+local GetTargetPlayerFunc, SetTargetPlayerFunc = CreateToggle(MainFrame, "Target Player", 402, "TargetPlayer", false)
+GetTargetPlayer = GetTargetPlayerFunc
+SetTargetPlayer = SetTargetPlayerFunc
+local GetInfJumpFunc, SetInfJumpFunc = CreateToggle(MainFrame, "Infinite Jump", 442, "InfJump", false)
+GetInfJump = GetInfJumpFunc
+SetInfJump = SetInfJumpFunc
+local GetXrayFunc, SetXrayFunc = CreateToggle(MainFrame, "XRay + Opt", 482, "Xray", false)
+GetXray = GetXrayFunc
+SetXray = SetXrayFunc
+local GetTweenPanelFunc, SetTweenPanelFunc = CreateToggle(MainFrame, "Tween Panel", 522, "TweenPanel", false)
 GetTweenPanel = GetTweenPanelFunc
 SetTweenPanel = SetTweenPanelFunc
-
-TrackConnection(UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-    if input.KeyCode == Enum.KeyCode.Q then
-        SetWalkFling(not GetWalkFling())
-    end
-end))
 
 local ProgressFrame = Instance.new("Frame")
 ProgressFrame.Size = UDim2.new(0, 280 * ScaleFactor, 0, 28 * ScaleFactor)
@@ -581,37 +862,34 @@ local function StartWalkFling()
     end)
 end
 
-local function ForceNormal(character)
-    local hum = character:FindFirstChildOfClass("Humanoid")
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hum or not hrp then return end
-    
-    hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-    
-    if not Frozen then
-        Frozen = true
-        hrp.Anchored = true
-        hrp.AssemblyLinearVelocity = Vector3.zero
-        hrp.AssemblyAngularVelocity = Vector3.zero
-        hrp.CFrame = hrp.CFrame + Vector3.new(0, 1.5, 0)
+local function shouldBlockState()
+    local character = LocalPlayer.Character
+    if not character then return false end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false end
+    local s = humanoid:GetState()
+    if s == Enum.HumanoidStateType.Physics or s == Enum.HumanoidStateType.Ragdoll or s == Enum.HumanoidStateType.FallingDown or s == Enum.HumanoidStateType.GettingUp then 
+        return true 
     end
+    return false
 end
 
-local function Release(character)
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if hrp and Frozen then
-        hrp.Anchored = false
-        Frozen = false
-    end
+local function enableControls()
+    pcall(function()
+        Controls:Enable()
+    end)
 end
 
-local function RestoreMotors(character)
-    for _, v in ipairs(character:GetDescendants()) do
-        if v:IsA("Motor6D") then
-            v.Enabled = true
-        elseif v:IsA("BallSocketConstraint") or v:IsA("HingeConstraint") or v:IsA("RodConstraint") then
-            v.Enabled = false
-            pcall(function() v:Destroy() end)
+local function cleanChar()
+    local character = LocalPlayer.Character
+    if not character then return end
+    for _, desc in pairs(character:GetDescendants()) do
+        if desc:IsA("BallSocketConstraint") or desc:IsA("NoCollisionConstraint") or desc:IsA("HingeConstraint") or (desc:IsA("Attachment") and (desc.Name == "A" or desc.Name == "B")) then
+            pcall(function() desc:Destroy() end)
+        elseif desc:IsA("BodyVelocity") or desc:IsA("BodyPosition") or desc:IsA("BodyGyro") then
+            pcall(function() desc:Destroy() end)
+        elseif desc:IsA("Motor6D") then
+            pcall(function() desc.Enabled = true end)
         end
     end
 end
@@ -627,27 +905,21 @@ local function EnableAntiRagdoll()
     local humanoid = character:WaitForChild("Humanoid", 10)
     if not humanoid then return end
     
-    for state in pairs(BlockedStates) do
-        humanoid:SetStateEnabled(state, false)
-    end
+    enableControls()
     
-    Controls:Enable()
-    
-    local stateConn = humanoid.StateChanged:Connect(function(_, newState)
+    local stateConn = humanoid.StateChanged:Connect(function()
         if not AntiRagdollActive then return end
-        if BlockedStates[newState] then
-            ForceNormal(character)
-            RestoreMotors(character)
-            Controls:Enable()
+        if shouldBlockState() then
+            pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Running) end)
+            cleanChar()
+            pcall(function() Workspace.CurrentCamera.CameraSubject = humanoid end)
+            enableControls()
         end
     end)
     table.insert(AntiRagdollConnections, stateConn)
     
     local steppedConn = RunService.Stepped:Connect(function()
-        if not AntiRagdollActive then
-            Release(character)
-            return
-        end
+        if not AntiRagdollActive then return end
         
         character = LocalPlayer.Character
         if not character then return end
@@ -655,61 +927,58 @@ local function EnableAntiRagdoll()
         humanoid = character:FindFirstChildOfClass("Humanoid")
         if not humanoid then return end
         
-        if BlockedStates[humanoid:GetState()] then
-            ForceNormal(character)
-            RestoreMotors(character)
-        else
-            Release(character)
-        end
-        
-        for state in pairs(BlockedStates) do
-            humanoid:SetStateEnabled(state, false)
+        if shouldBlockState() then
+            pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Running) end)
+            cleanChar()
         end
     end)
     table.insert(AntiRagdollConnections, steppedConn)
     
-    local descConn = character.DescendantAdded:Connect(function(desc)
+    local descConn = character.DescendantAdded:Connect(function()
         if not AntiRagdollActive then return end
-        if desc:IsA("BallSocketConstraint") or desc:IsA("HingeConstraint") or desc:IsA("RodConstraint") then
-            desc.Enabled = false
-            pcall(function() desc:Destroy() end)
-        end
-        if desc:IsA("Motor6D") then
-            desc.Enabled = true
-        end
+        if shouldBlockState() then cleanChar() end
     end)
     table.insert(AntiRagdollConnections, descConn)
     
+    pcall(function()
+        local pkg = ReplicatedStorage:FindFirstChild("Packages")
+        if pkg then
+            local net = pkg:FindFirstChild("Net")
+            if net then
+                local ev = net:FindFirstChild("RE/CombatService/ApplyImpulse") or net:FindFirstChild("ApplyImpulse")
+                if ev and ev:IsA("RemoteEvent") then
+                    local impulseConn = ev.OnClientEvent:Connect(function()
+                        if shouldBlockState() then
+                            local hrp = character and character:FindFirstChild("HumanoidRootPart")
+                            if hrp then
+                                pcall(function() hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) end)
+                            end
+                        end
+                    end)
+                    table.insert(AntiRagdollConnections, impulseConn)
+                end
+            end
+        end
+    end)
+    
     local charAddedConn = LocalPlayer.CharacterAdded:Connect(function(newChar)
-        Frozen = false
+        task.wait(0.5)
         character = newChar
         humanoid = newChar:WaitForChild("Humanoid", 10)
         if not humanoid then return end
         
         task.wait(0.1)
-        
-        for state in pairs(BlockedStates) do
-            humanoid:SetStateEnabled(state, false)
-        end
-        
-        Controls:Enable()
+        enableControls()
+        cleanChar()
     end)
     table.insert(AntiRagdollConnections, charAddedConn)
+    
+    enableControls()
+    cleanChar()
 end
 
 local function DisableAntiRagdoll()
     AntiRagdollActive = false
-    
-    local character = LocalPlayer.Character
-    if character then
-        Release(character)
-        local humanoid = character:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            for state in pairs(BlockedStates) do
-                humanoid:SetStateEnabled(state, true)
-            end
-        end
-    end
     
     for _, conn in pairs(AntiRagdollConnections) do
         pcall(function() conn:Disconnect() end)
@@ -717,9 +986,52 @@ local function DisableAntiRagdoll()
     AntiRagdollConnections = {}
 end
 
+local function SetupJumpTracking()
+    local character = LocalPlayer.Character
+    if character then
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.StateChanged:Connect(function(old, new)
+                if new == Enum.HumanoidStateType.Jumping then
+                    IsJumping = true
+                elseif new == Enum.HumanoidStateType.Landed or new == Enum.HumanoidStateType.Running then
+                    IsJumping = false
+                end
+            end)
+        end
+    end
+end
+
 local function EnableAntiKnockback()
     if AntiKnockbackActive then return end
     AntiKnockbackActive = true
+    
+    SetupJumpTracking()
+    
+    pcall(function()
+        local pkg = ReplicatedStorage:FindFirstChild("Packages")
+        if pkg then
+            local net = pkg:FindFirstChild("Net")
+            if net then
+                local ev = net:FindFirstChild("RE/CombatService/ApplyImpulse") or net:FindFirstChild("ApplyImpulse")
+                if ev and ev:IsA("RemoteEvent") then
+                    ev.OnClientEvent:Connect(function()
+                        if not AntiKnockbackActive then return end
+                        local char = LocalPlayer.Character
+                        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                        if hrp then
+                            task.wait()
+                            local vel = hrp.AssemblyLinearVelocity
+                            local clampedX = math.clamp(vel.X, -MaxHorizontalSpeed, MaxHorizontalSpeed)
+                            local clampedY = math.clamp(vel.Y, -MaxVerticalKnockback, MaxVerticalKnockback)
+                            local clampedZ = math.clamp(vel.Z, -MaxHorizontalSpeed, MaxHorizontalSpeed)
+                            hrp.AssemblyLinearVelocity = Vector3.new(clampedX, clampedY, clampedZ)
+                        end
+                    end)
+                end
+            end
+        end
+    end)
     
     AntiKnockbackConnection = RunService.Heartbeat:Connect(function()
         if not AntiKnockbackActive then return end
@@ -732,37 +1044,66 @@ local function EnableAntiKnockback()
         if not hrp or not humanoid then return end
         
         local state = humanoid:GetState()
-        if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll then
+        local currentVel = hrp.AssemblyLinearVelocity
+        
+        if state == Enum.HumanoidStateType.Jumping then
+            IsJumping = true
+            lastVelocity = currentVel
             return
+        end
+        
+        if state == Enum.HumanoidStateType.Landed or state == Enum.HumanoidStateType.Running then
+            IsJumping = false
         end
         
         if getgenv().TweenPanelRunning then
+            lastVelocity = currentVel
             return
         end
         
-        local vel = hrp.AssemblyLinearVelocity
-        local horizontalVel = Vector3.new(vel.X, 0, vel.Z)
-        local horizontalSpeed = horizontalVel.Magnitude
-        local verticalSpeed = vel.Y
+        if shouldBlockState() then
+            cleanChar()
+            
+            local clampedX = math.clamp(currentVel.X, -MaxHorizontalSpeed, MaxHorizontalSpeed)
+            local clampedY = math.clamp(currentVel.Y, -MaxVerticalKnockback, MaxVerticalKnockback)
+            local clampedZ = math.clamp(currentVel.Z, -MaxHorizontalSpeed, MaxHorizontalSpeed)
+            hrp.AssemblyLinearVelocity = Vector3.new(clampedX, clampedY, clampedZ)
+            
+            pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Running) end)
+            lastVelocity = hrp.AssemblyLinearVelocity
+            return
+        end
         
-        local needsClamp = false
-        local newX, newY, newZ = vel.X, vel.Y, vel.Z
+        local newVel = currentVel
+        local needsChange = false
         
-        if horizontalSpeed > MaxHorizontalSpeed then
-            needsClamp = true
+        local horizontalVel = Vector3.new(currentVel.X, 0, currentVel.Z)
+        if horizontalVel.Magnitude > MaxHorizontalSpeed then
             local dir = horizontalVel.Unit
-            newX = dir.X * MaxHorizontalSpeed
-            newZ = dir.Z * MaxHorizontalSpeed
+            newVel = Vector3.new(dir.X * MaxHorizontalSpeed, newVel.Y, dir.Z * MaxHorizontalSpeed)
+            needsChange = true
         end
         
-        if verticalSpeed > MaxVerticalSpeed then
-            needsClamp = true
-            newY = MaxVerticalSpeed
+        if not IsJumping and state ~= Enum.HumanoidStateType.Freefall then
+            if currentVel.Y > MaxVerticalKnockback then
+                newVel = Vector3.new(newVel.X, MaxVerticalKnockback, newVel.Z)
+                needsChange = true
+            end
         end
         
-        if needsClamp then
-            hrp.AssemblyLinearVelocity = Vector3.new(newX, newY, newZ)
+        if state == Enum.HumanoidStateType.Freefall and not IsJumping then
+            local yChange = currentVel.Y - lastVelocity.Y
+            if yChange > 40 then
+                newVel = Vector3.new(newVel.X, math.min(currentVel.Y, MaxVerticalKnockback), newVel.Z)
+                needsChange = true
+            end
         end
+        
+        if needsChange then
+            hrp.AssemblyLinearVelocity = newVel
+        end
+        
+        lastVelocity = hrp.AssemblyLinearVelocity
     end)
 end
 
@@ -1070,16 +1411,22 @@ TrackConnection(RunService.Heartbeat:Connect(function()
     local moveDir = humanoid.MoveDirection
     if moveDir.Magnitude > 0.1 then
         local dir = moveDir.Unit
-        hrp.AssemblyLinearVelocity = Vector3.new(dir.X * currentSpeed, hrp.AssemblyLinearVelocity.Y, dir.Z * currentSpeed)
+        local currentVel = hrp.AssemblyLinearVelocity
+        local targetVel = Vector3.new(dir.X * currentSpeed, currentVel.Y, dir.Z * currentSpeed)
+        local lerpAlpha = 1.0
+        local smoothVel = currentVel:Lerp(targetVel, lerpAlpha)
+        hrp.AssemblyLinearVelocity = smoothVel
     end
 end))
 
 local lastAntiRagdoll, lastAntiKnockback, lastWalkFling, lastAutoGrab = false, false, false, false
-local lastFloatSteal, lastSpeedBoost, lastHitbox, lastAutoBat, lastTweenPanel = false, false, false, false, false
+local lastFloatSteal, lastSpeedBoost, lastHitbox, lastAutoBat, lastUnwalk = false, false, false, false, false
+local lastTargetPlayer, lastInfJump, lastXray, lastTweenPanel = false, false, false, false
 
 TrackConnection(RunService.Heartbeat:Connect(function()
     local ar, ak, wf, ag = GetAntiRagdoll(), GetAntiKnockback(), GetWalkFling(), GetAutoGrabFunc()
-    local fs, sb, hb, ab, tp = GetFloatSteal(), GetSpeedBoost(), GetHitboxExp(), GetAutoBat(), GetTweenPanel()
+    local fs, sb, hb, ab, uw = GetFloatSteal(), GetSpeedBoost(), GetHitboxExp(), GetAutoBat(), GetUnwalk()
+    local tp, ij, xr, tpanel = GetTargetPlayer(), GetInfJump(), GetXray(), GetTweenPanel()
 
     if ar ~= lastAntiRagdoll then
         if ar then EnableAntiRagdoll() else DisableAntiRagdoll() end
@@ -1121,8 +1468,27 @@ TrackConnection(RunService.Heartbeat:Connect(function()
         AutoBatEnabled = ab
         lastAutoBat = ab
     end
-    if tp ~= lastTweenPanel then
-        if tp then
+    if uw ~= lastUnwalk then
+        if uw then EnableUnwalk() else DisableUnwalk() end
+        lastUnwalk = uw
+    end
+    if tp ~= lastTargetPlayer then
+        TargetPlayerEnabled = tp
+        if tp then StartTargetPlayer() else StopTargetPlayer() end
+        lastTargetPlayer = tp
+    end
+    if ij ~= lastInfJump then
+        InfJumpEnabled = ij
+        if ij then EnableInfJump() else DisableInfJump() end
+        lastInfJump = ij
+    end
+    if xr ~= lastXray then
+        XrayEnabled = xr
+        if xr then EnableXray() else DisableXray() end
+        lastXray = xr
+    end
+    if tpanel ~= lastTweenPanel then
+        if tpanel then
             loadstring(game:HttpGet("https://raw.githubusercontent.com/ima123-en/jaboilin123/refs/heads/main/a", true))()
         else
             pcall(function()
@@ -1131,7 +1497,7 @@ TrackConnection(RunService.Heartbeat:Connect(function()
                 end
             end)
         end
-        lastTweenPanel = tp
+        lastTweenPanel = tpanel
     end
 end))
 
@@ -1140,8 +1506,12 @@ local function FullCleanup()
     KillWalkFling()
     DisableAntiRagdoll()
     DisableAntiKnockback()
+    DisableUnwalk()
     StopFloat()
     UpdateHitboxExpander(false)
+    StopTargetPlayer()
+    DisableInfJump()
+    DisableXray()
     if FloatPlatform then FloatPlatform:Destroy() FloatPlatform = nil end
     pcall(function()
         if game.CoreGui:FindFirstChild("TweenPanel") then
@@ -1157,11 +1527,40 @@ CloseButton.MouseButton1Click:Connect(function()
     ScreenGui:Destroy()
 end)
 
-TrackConnection(LocalPlayer.CharacterAdded:Connect(function()
-    Frozen = false
+TrackConnection(LocalPlayer.CharacterAdded:Connect(function(char)
     StopFloat()
     FloatStealStartTime = 0
     OriginalGroundY = nil
     GrabStartTime = 0
     CurrentGrabPrompt = nil
+    lastVelocity = Vector3.new(0, 0, 0)
+    IsJumping = false
+    
+    local humanoid = char:WaitForChild("Humanoid", 10)
+    if humanoid then
+        humanoid.StateChanged:Connect(function(old, new)
+            if new == Enum.HumanoidStateType.Jumping then
+                IsJumping = true
+            elseif new == Enum.HumanoidStateType.Landed or new == Enum.HumanoidStateType.Running then
+                IsJumping = false
+            end
+        end)
+    end
+    
+    if UnwalkEnabled then
+        task.wait(0.5)
+        DisableAnimations()
+    end
+    if InfJumpEnabled then
+        task.wait(0.5)
+        EnableInfJump()
+    end
+    if TargetPlayerEnabled then
+        task.wait(0.5)
+        StartTargetPlayer()
+    end
+    if AntiRagdollActive then
+        task.wait(0.5)
+        EnableAntiRagdoll()
+    end
 end))

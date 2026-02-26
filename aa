@@ -89,8 +89,9 @@ local SmartFloatRange = 30
 local FloatStartDelay = 0.5
 
 local SpeedBoostEnabled = false
-local NormalSpeed = SavedSettings.NormalSpeed or 57
-local StealSpeed = SavedSettings.StealSpeed or 29.5
+local NormalSpeed = SavedSettings.NormalSpeed or 59.5
+local StealSpeed = SavedSettings.StealSpeed or 59.5
+local AirSpeed = SavedSettings.AirSpeed or 59.5
 
 local TweenSpeedEnabled = false
 local TweenTargetSpeed = 61
@@ -126,7 +127,14 @@ local lastVelocity = Vector3.new(0, 0, 0)
 
 local SetWalkFling, SetTweenPanel, SetUnwalk, SetTargetPlayer, SetInfJump, SetXray, SetAutoGrab
 local GetWalkFling, GetTweenPanel, GetFloatSteal, GetSpeedBoost, GetHitboxExp, GetAutoBat, GetAntiRagdoll, GetAntiKnockback, GetUnwalk, GetTargetPlayer, GetInfJump, GetXray, GetAutoGrab
-local ScreenGui, SpeedFrame, SpeedStatusLabel
+local ScreenGui, SpeedFrame, SpeedStatusLabel, SpeedAirLabel
+
+local function IsGrounded(hrp)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = {LocalPlayer.Character}
+    local result = Workspace:Raycast(hrp.Position, Vector3.new(0, -3.5, 0), rayParams)
+    return result ~= nil
+end
 
 local function IsGroundedTween(hrp)
     local rayParams = RaycastParams.new()
@@ -738,8 +746,8 @@ GetTweenPanel = GetTweenPanelFunc
 SetTweenPanel = SetTweenPanelFunc
 
 SpeedFrame = Instance.new("Frame")
-SpeedFrame.Size = UDim2.new(0, 200 * ScaleFactor, 0, 70 * ScaleFactor)
-SpeedFrame.Position = UDim2.new(1, -220 * ScaleFactor, 1, -90 * ScaleFactor)
+SpeedFrame.Size = UDim2.new(0, 220 * ScaleFactor, 0, 110 * ScaleFactor)
+SpeedFrame.Position = UDim2.new(1, -240 * ScaleFactor, 1, -130 * ScaleFactor)
 SpeedFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
 SpeedFrame.BorderSizePixel = 0
 SpeedFrame.Visible = false
@@ -753,24 +761,24 @@ local SpeedTitle = Instance.new("TextLabel", SpeedFrame)
 SpeedTitle.Size = UDim2.new(1, 0, 0, 20 * ScaleFactor)
 SpeedTitle.Position = UDim2.new(0, 0, 0, 5 * ScaleFactor)
 SpeedTitle.BackgroundTransparency = 1
-SpeedTitle.Text = "Speed Boost"
+SpeedTitle.Text = "Speed Boost - Direct"
 SpeedTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
 SpeedTitle.Font = Enum.Font.GothamBold
 SpeedTitle.TextSize = 12 * ScaleFactor
 
 local SpeedNormalLabel = Instance.new("TextLabel", SpeedFrame)
-SpeedNormalLabel.Size = UDim2.new(0, 45 * ScaleFactor, 0, 20 * ScaleFactor)
+SpeedNormalLabel.Size = UDim2.new(0, 45 * ScaleFactor, 0, 18 * ScaleFactor)
 SpeedNormalLabel.Position = UDim2.new(0, 10 * ScaleFactor, 0, 28 * ScaleFactor)
 SpeedNormalLabel.BackgroundTransparency = 1
 SpeedNormalLabel.Text = "Normal"
-SpeedNormalLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-SpeedNormalLabel.Font = Enum.Font.Gotham
+SpeedNormalLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+SpeedNormalLabel.Font = Enum.Font.GothamBold
 SpeedNormalLabel.TextSize = 10 * ScaleFactor
 SpeedNormalLabel.TextXAlignment = Enum.TextXAlignment.Left
 
 local SpeedNormalBox = Instance.new("TextBox", SpeedFrame)
-SpeedNormalBox.Size = UDim2.new(0, 40 * ScaleFactor, 0, 18 * ScaleFactor)
-SpeedNormalBox.Position = UDim2.new(0, 55 * ScaleFactor, 0, 29 * ScaleFactor)
+SpeedNormalBox.Size = UDim2.new(0, 45 * ScaleFactor, 0, 18 * ScaleFactor)
+SpeedNormalBox.Position = UDim2.new(0, 60 * ScaleFactor, 0, 28 * ScaleFactor)
 SpeedNormalBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 SpeedNormalBox.Text = tostring(NormalSpeed)
 SpeedNormalBox.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -780,18 +788,18 @@ SpeedNormalBox.ClearTextOnFocus = false
 Instance.new("UICorner", SpeedNormalBox).CornerRadius = UDim.new(0, 4 * ScaleFactor)
 
 local SpeedStealLabel = Instance.new("TextLabel", SpeedFrame)
-SpeedStealLabel.Size = UDim2.new(0, 30 * ScaleFactor, 0, 20 * ScaleFactor)
-SpeedStealLabel.Position = UDim2.new(0, 105 * ScaleFactor, 0, 28 * ScaleFactor)
+SpeedStealLabel.Size = UDim2.new(0, 35 * ScaleFactor, 0, 18 * ScaleFactor)
+SpeedStealLabel.Position = UDim2.new(0, 115 * ScaleFactor, 0, 28 * ScaleFactor)
 SpeedStealLabel.BackgroundTransparency = 1
 SpeedStealLabel.Text = "Steal"
-SpeedStealLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-SpeedStealLabel.Font = Enum.Font.Gotham
+SpeedStealLabel.TextColor3 = Color3.fromRGB(255, 180, 50)
+SpeedStealLabel.Font = Enum.Font.GothamBold
 SpeedStealLabel.TextSize = 10 * ScaleFactor
 SpeedStealLabel.TextXAlignment = Enum.TextXAlignment.Left
 
 local SpeedStealBox = Instance.new("TextBox", SpeedFrame)
-SpeedStealBox.Size = UDim2.new(0, 40 * ScaleFactor, 0, 18 * ScaleFactor)
-SpeedStealBox.Position = UDim2.new(0, 140 * ScaleFactor, 0, 29 * ScaleFactor)
+SpeedStealBox.Size = UDim2.new(0, 45 * ScaleFactor, 0, 18 * ScaleFactor)
+SpeedStealBox.Position = UDim2.new(0, 155 * ScaleFactor, 0, 28 * ScaleFactor)
 SpeedStealBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 SpeedStealBox.Text = tostring(StealSpeed)
 SpeedStealBox.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -800,15 +808,36 @@ SpeedStealBox.TextSize = 11 * ScaleFactor
 SpeedStealBox.ClearTextOnFocus = false
 Instance.new("UICorner", SpeedStealBox).CornerRadius = UDim.new(0, 4 * ScaleFactor)
 
+SpeedAirLabel = Instance.new("TextLabel", SpeedFrame)
+SpeedAirLabel.Size = UDim2.new(0, 45 * ScaleFactor, 0, 18 * ScaleFactor)
+SpeedAirLabel.Position = UDim2.new(0, 10 * ScaleFactor, 0, 52 * ScaleFactor)
+SpeedAirLabel.BackgroundTransparency = 1
+SpeedAirLabel.Text = "Air"
+SpeedAirLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
+SpeedAirLabel.Font = Enum.Font.GothamBold
+SpeedAirLabel.TextSize = 10 * ScaleFactor
+SpeedAirLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local SpeedAirBox = Instance.new("TextBox", SpeedFrame)
+SpeedAirBox.Size = UDim2.new(0, 45 * ScaleFactor, 0, 18 * ScaleFactor)
+SpeedAirBox.Position = UDim2.new(0, 60 * ScaleFactor, 0, 52 * ScaleFactor)
+SpeedAirBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+SpeedAirBox.Text = tostring(AirSpeed)
+SpeedAirBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+SpeedAirBox.Font = Enum.Font.Gotham
+SpeedAirBox.TextSize = 11 * ScaleFactor
+SpeedAirBox.ClearTextOnFocus = false
+Instance.new("UICorner", SpeedAirBox).CornerRadius = UDim.new(0, 4 * ScaleFactor)
+
 SpeedStatusLabel = Instance.new("TextLabel", SpeedFrame)
-SpeedStatusLabel.Size = UDim2.new(1, -20 * ScaleFactor, 0, 16 * ScaleFactor)
-SpeedStatusLabel.Position = UDim2.new(0, 10 * ScaleFactor, 0, 50 * ScaleFactor)
-SpeedStatusLabel.BackgroundTransparency = 1
-SpeedStatusLabel.Text = "NORMAL - " .. tostring(NormalSpeed)
-SpeedStatusLabel.TextColor3 = Color3.fromRGB(0, 200, 100)
-SpeedStatusLabel.Font = Enum.Font.GothamBold
-SpeedStatusLabel.TextSize = 10 * ScaleFactor
-SpeedStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+SpeedStatusLabel.Size = UDim2.new(1, -20 * ScaleFactor, 0, 36 * ScaleFactor)
+SpeedStatusLabel.Position = UDim2.new(0, 10 * ScaleFactor, 0, 72 * ScaleFactor)
+SpeedStatusLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+SpeedStatusLabel.Text = "NORMAL - GROUND - 59.5"
+SpeedStatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+SpeedStatusLabel.Font = Enum.Font.GothamBlack
+SpeedStatusLabel.TextSize = 11 * ScaleFactor
+Instance.new("UICorner", SpeedStatusLabel).CornerRadius = UDim.new(0, 6 * ScaleFactor)
 
 SpeedNormalBox.FocusLost:Connect(function()
     local num = tonumber(SpeedNormalBox.Text)
@@ -829,6 +858,17 @@ SpeedStealBox.FocusLost:Connect(function()
         SaveSettings(SavedSettings)
     else
         SpeedStealBox.Text = tostring(StealSpeed)
+    end
+end)
+
+SpeedAirBox.FocusLost:Connect(function()
+    local num = tonumber(SpeedAirBox.Text)
+    if num and num > 0 then
+        AirSpeed = num
+        SavedSettings.AirSpeed = num
+        SaveSettings(SavedSettings)
+    else
+        SpeedAirBox.Text = tostring(AirSpeed)
     end
 end)
 
@@ -1278,25 +1318,43 @@ end)
 
 TrackConnection(RunService.Heartbeat:Connect(function()
     if not SpeedBoostEnabled then return end
+    
     local character = LocalPlayer.Character
     if not character then return end
+    
     local hrp = character:FindFirstChild("HumanoidRootPart")
     local humanoid = character:FindFirstChild("Humanoid")
     if not hrp or not humanoid or humanoid.Health <= 0 then return end
+    
     local state = humanoid:GetState()
     if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll or state == Enum.HumanoidStateType.FallingDown then return end
-    local isStealing = humanoid.WalkSpeed <= 25
-    local currentSpeed = isStealing and StealSpeed or NormalSpeed
-    SpeedStatusLabel.Text = (isStealing and "STEALING - " or "NORMAL - ") .. tostring(currentSpeed)
-    SpeedStatusLabel.TextColor3 = isStealing and Color3.fromRGB(255, 180, 50) or Color3.fromRGB(0, 200, 100)
+    
     local moveDir = humanoid.MoveDirection
-    if moveDir.Magnitude > 0.1 then
-        local dir = moveDir.Unit
-        local currentVel = hrp.AssemblyLinearVelocity
-        local targetVel = Vector3.new(dir.X * currentSpeed, currentVel.Y, dir.Z * currentSpeed)
-        local lerpAlpha = 1.0
-        local smoothVel = currentVel:Lerp(targetVel, lerpAlpha)
-        hrp.AssemblyLinearVelocity = smoothVel
+    if moveDir.Magnitude < 0.1 then return end
+    
+    local isStealing = humanoid.WalkSpeed <= 25
+    local grounded = IsGrounded(hrp)
+    
+    local targetSpeed
+    if isStealing then
+        targetSpeed = grounded and StealSpeed or AirSpeed
+    else
+        targetSpeed = grounded and NormalSpeed or AirSpeed
+    end
+    
+    local currentVel = hrp.AssemblyLinearVelocity
+    local newVel = moveDir.Unit * targetSpeed
+    hrp.AssemblyLinearVelocity = Vector3.new(newVel.X, currentVel.Y, newVel.Z)
+    
+    local statusText = (isStealing and "STEAL - " or "NORMAL - ") .. (grounded and "GROUND - " or "AIR - ") .. string.format("%.1f", targetSpeed)
+    SpeedStatusLabel.Text = statusText
+    
+    if isStealing then
+        SpeedStatusLabel.TextColor3 = Color3.fromRGB(255, 180, 50)
+    elseif grounded then
+        SpeedStatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+    else
+        SpeedStatusLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
     end
 end))
 

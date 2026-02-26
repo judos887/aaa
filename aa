@@ -22,6 +22,10 @@ local AllConnections = {}
 local AllKeybinds = {}
 local ListeningForKeybind = nil
 
+local URLS = {
+    AutoGrab = "https://raw.githubusercontent.com/ima123-en/auto-grab/refs/heads/main/ag"
+}
+
 local function TrackConnection(conn)
     table.insert(AllConnections, conn)
     return conn
@@ -56,11 +60,6 @@ local SavedSettings = LoadSettings()
 local ScaleFactor = 1
 local SelectedVersion = nil
 
-local AutoGrabEnabled = false
-local AutoGrabRange = 5
-local GrabStartTime = 0
-local CurrentGrabPrompt = nil
-
 local WalkFlingRunning = false
 local FlingConnection = nil
 local CollisionConnection = nil
@@ -93,6 +92,16 @@ local SpeedBoostEnabled = false
 local NormalSpeed = SavedSettings.NormalSpeed or 57
 local StealSpeed = SavedSettings.StealSpeed or 29.5
 
+-- Tween Speed Boost Variables (NEW SYSTEM)
+local TweenSpeedEnabled = false
+local TweenTargetSpeed = 61
+local TweenLerpAlpha = 0.35
+local TweenRampSpeed = 0.08
+local TweenCurrentMultiplier = 0
+local TweenLastPosition = nil
+local TweenLastTime = 0
+local TweenCorrectionCount = 0
+
 local AutoBatEnabled = false
 local BatSpamDelay = 0.05
 
@@ -112,11 +121,97 @@ local XrayEnabled = false
 local XrayActive = false
 local OriginalTransparency = {}
 
+local AutoGrabEnabled = false
+
 local lastVelocity = Vector3.new(0, 0, 0)
 
-local SetWalkFling, SetTweenPanel, SetAutoGrab, SetUnwalk, SetTargetPlayer, SetInfJump, SetXray
-local GetWalkFling, GetTweenPanel, GetAutoGrabFunc, GetFloatSteal, GetSpeedBoost, GetHitboxExp, GetAutoBat, GetAntiRagdoll, GetAntiKnockback, GetUnwalk, GetTargetPlayer, GetInfJump, GetXray
-local ScreenGui, StatusLabel, ProgFill, ProgPercent, SpeedFrame, SpeedStatusLabel
+local SetWalkFling, SetTweenPanel, SetUnwalk, SetTargetPlayer, SetInfJump, SetXray, SetAutoGrab
+local GetWalkFling, GetTweenPanel, GetFloatSteal, GetSpeedBoost, GetHitboxExp, GetAutoBat, GetAntiRagdoll, GetAntiKnockback, GetUnwalk, GetTargetPlayer, GetInfJump, GetXray, GetAutoGrab
+local ScreenGui, SpeedFrame, SpeedStatusLabel
+
+-- Tween Speed Boost Functions (from first script)
+local function IsGroundedTween(hrp)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = {LocalPlayer.Character}
+    local result = Workspace:Raycast(hrp.Position, Vector3.new(0, -3.5, 0), rayParams)
+    return result ~= nil
+end
+
+local function DetectCorrectionTween(hrp)
+    local now = tick()
+    local currentPos = hrp.Position
+    
+    if TweenLastPosition and (now - TweenLastTime) > 0 then
+        local expected = (now - TweenLastTime) * TweenTargetSpeed * TweenCurrentMultiplier
+        local actual = (Vector3.new(currentPos.X, 0, currentPos.Z) - Vector3.new(TweenLastPosition.X, 0, TweenLastPosition.Z)).Magnitude
+        
+        if expected > 2 and actual < expected * 0.5 then
+            TweenCorrectionCount = TweenCorrectionCount + 1
+            TweenLastPosition = currentPos
+            TweenLastTime = now
+            return true
+        end
+    end
+    
+    TweenLastPosition = currentPos
+    TweenLastTime = now
+    return false
+end
+
+local function ApplyTweenSpeed(hrp, moveDir)
+    if moveDir.Magnitude < 0.1 then 
+        TweenCurrentMultiplier = 0.3
+        return 0
+    end
+    
+    local corrected = DetectCorrectionTween(hrp)
+    
+    if corrected then
+        TweenCurrentMultiplier = 0.5
+    else
+        TweenCurrentMultiplier = math.min(1, TweenCurrentMultiplier + TweenRampSpeed)
+        TweenCorrectionCount = math.max(0, TweenCorrectionCount - 0.05)
+    end
+    
+    local safeSpeed = TweenTargetSpeed
+    if TweenCorrectionCount > 3 then
+        safeSpeed = TweenTargetSpeed * 0.8
+    elseif TweenCorrectionCount > 1 then
+        safeSpeed = TweenTargetSpeed * 0.9
+    end
+    
+    local finalSpeed = safeSpeed * TweenCurrentMultiplier
+    local grounded = IsGroundedTween(hrp)
+    local alpha = grounded and TweenLerpAlpha or (TweenLerpAlpha * 0.5)
+    
+    local currentVel = hrp.AssemblyLinearVelocity
+    local targetVel = moveDir.Unit * finalSpeed
+    local newVel = Vector3.new(
+        currentVel.X + (targetVel.X - currentVel.X) * alpha,
+        currentVel.Y,
+        currentVel.Z + (targetVel.Z - currentVel.Z) * alpha
+    )
+    
+    hrp.AssemblyLinearVelocity = newVel
+    
+    return math.floor(Vector3.new(newVel.X, 0, newVel.Z).Magnitude)
+end
+
+local function ResetTweenSpeed()
+    TweenCurrentMultiplier = 0.3
+    TweenCorrectionCount = 0
+    TweenLastPosition = nil
+    TweenLastTime = 0
+end
+
+-- Export for Tween Panel to use
+getgenv().SchmecktTweenSpeed = {
+    Apply = ApplyTweenSpeed,
+    Reset = ResetTweenSpeed,
+    GetCorrectionCount = function() return TweenCorrectionCount end,
+    SetEnabled = function(val) TweenSpeedEnabled = val end,
+    IsEnabled = function() return TweenSpeedEnabled end
+}
 
 local function GetMyPlot()
     local plots = Workspace:FindFirstChild("Plots")
@@ -627,14 +722,9 @@ GetAntiKnockback = GetAntiKnockbackFunc
 local GetWalkFlingFunc, SetWalkFlingFunc = CreateToggle(MainFrame, "WalkFling", 122, "WalkFling", false)
 GetWalkFling = GetWalkFlingFunc
 SetWalkFling = SetWalkFlingFunc
-
-local GetAutoGrabFuncTemp, SetAutoGrabFunc = CreateToggle(MainFrame, "Auto Grab", 162, "AutoGrab", false, true)
-GetAutoGrabFunc = GetAutoGrabFuncTemp
+local GetAutoGrabFunc, SetAutoGrabFunc = CreateToggle(MainFrame, "Auto Grab", 162, "AutoGrab", false)
+GetAutoGrab = GetAutoGrabFunc
 SetAutoGrab = SetAutoGrabFunc
-
-getgenv().SchmecktSetAutoGrab = SetAutoGrab
-getgenv().SchmecktGetAutoGrab = GetAutoGrabFunc
-
 local GetFloatStealFunc, SetFloatSteal = CreateToggle(MainFrame, "Smart Float", 202, "SmartFloat", false)
 GetFloatSteal = GetFloatStealFunc
 local GetSpeedBoostFunc, SetSpeedBoost = CreateToggle(MainFrame, "Speed Boost", 242, "SpeedBoost", false)
@@ -658,70 +748,6 @@ SetXray = SetXrayFunc
 local GetTweenPanelFunc, SetTweenPanelFunc = CreateToggle(MainFrame, "Tween Panel", 522, "TweenPanel", false)
 GetTweenPanel = GetTweenPanelFunc
 SetTweenPanel = SetTweenPanelFunc
-
-local ProgressFrame = Instance.new("Frame")
-ProgressFrame.Size = UDim2.new(0, 280 * ScaleFactor, 0, 28 * ScaleFactor)
-ProgressFrame.Position = UDim2.new(0.5, -140 * ScaleFactor, 0, 14 * ScaleFactor)
-ProgressFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
-ProgressFrame.BackgroundTransparency = 0.15
-ProgressFrame.BorderSizePixel = 0
-ProgressFrame.Parent = ScreenGui
-Instance.new("UICorner", ProgressFrame).CornerRadius = UDim.new(0, 8 * ScaleFactor)
-Instance.new("UIStroke", ProgressFrame).Color = Color3.fromRGB(138, 43, 226)
-
-local ProgLabel = Instance.new("TextLabel")
-ProgLabel.Size = UDim2.new(0, 60 * ScaleFactor, 1, 0)
-ProgLabel.Position = UDim2.new(0, 6 * ScaleFactor, 0, 0)
-ProgLabel.BackgroundTransparency = 1
-ProgLabel.Text = "GRAB"
-ProgLabel.TextColor3 = Color3.fromRGB(200, 120, 255)
-ProgLabel.Font = Enum.Font.GothamBlack
-ProgLabel.TextSize = 11 * ScaleFactor
-ProgLabel.TextXAlignment = Enum.TextXAlignment.Left
-ProgLabel.Parent = ProgressFrame
-
-StatusLabel = Instance.new("TextLabel")
-StatusLabel.Size = UDim2.new(0, 80 * ScaleFactor, 1, 0)
-StatusLabel.Position = UDim2.new(0, 48 * ScaleFactor, 0, 0)
-StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "Disabled"
-StatusLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
-StatusLabel.Font = Enum.Font.GothamBold
-StatusLabel.TextSize = 10 * ScaleFactor
-StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-StatusLabel.Parent = ProgressFrame
-
-local ProgBarBg = Instance.new("Frame")
-ProgBarBg.Size = UDim2.new(0.55, 0, 0, 10 * ScaleFactor)
-ProgBarBg.Position = UDim2.new(0.38, 0, 0.5, -5 * ScaleFactor)
-ProgBarBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-ProgBarBg.BorderSizePixel = 0
-ProgBarBg.Parent = ProgressFrame
-Instance.new("UICorner", ProgBarBg).CornerRadius = UDim.new(1, 0)
-Instance.new("UIStroke", ProgBarBg).Color = Color3.fromRGB(60, 60, 60)
-
-ProgFill = Instance.new("Frame")
-ProgFill.Size = UDim2.new(0, 0, 1, 0)
-ProgFill.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
-ProgFill.BorderSizePixel = 0
-ProgFill.Parent = ProgBarBg
-Instance.new("UICorner", ProgFill).CornerRadius = UDim.new(1, 0)
-Instance.new("UIGradient", ProgFill).Color = ColorSequence.new{
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(138, 43, 226)),
-    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(220, 150, 255)),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(138, 43, 226))
-}
-
-ProgPercent = Instance.new("TextLabel")
-ProgPercent.Size = UDim2.new(0, 35 * ScaleFactor, 1, 0)
-ProgPercent.Position = UDim2.new(0.94, -35 * ScaleFactor, 0, 0)
-ProgPercent.BackgroundTransparency = 1
-ProgPercent.Text = "0%"
-ProgPercent.TextColor3 = Color3.fromRGB(255, 255, 255)
-ProgPercent.Font = Enum.Font.GothamBold
-ProgPercent.TextSize = 10 * ScaleFactor
-ProgPercent.TextXAlignment = Enum.TextXAlignment.Right
-ProgPercent.Parent = ProgressFrame
 
 SpeedFrame = Instance.new("Frame")
 SpeedFrame.Size = UDim2.new(0, 200 * ScaleFactor, 0, 70 * ScaleFactor)
@@ -1123,39 +1149,6 @@ local function GetNearestPlayerDistance(hrp)
     return minDist
 end
 
-local function getPromptPosition(prompt)
-    local p = prompt.Parent
-    if p:IsA("Attachment") then return p.WorldPosition end
-    if p:IsA("BasePart") then return p.Position end
-    if p:IsA("Model") then
-        local pr = p.PrimaryPart or p:FindFirstChildWhichIsA("BasePart")
-        if pr then return pr.Position end
-    end
-    local f = p:FindFirstChildWhichIsA("BasePart", true)
-    return f and f.Position or nil
-end
-
-local function findNearestStealPrompt()
-    local char = LocalPlayer.Character
-    if not char then return nil, math.huge end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return nil, math.huge end
-    local nearest, minDist = nil, math.huge
-    local plots = Workspace:FindFirstChild("Plots")
-    if plots then
-        for _, obj in ipairs(plots:GetDescendants()) do
-            if obj:IsA("ProximityPrompt") and obj.Enabled and obj.ActionText == "Steal" then
-                local pos = getPromptPosition(obj)
-                if pos then
-                    local dist = (hrp.Position - pos).Magnitude
-                    if dist < minDist then minDist, nearest = dist, obj end
-                end
-            end
-        end
-    end
-    return nearest, minDist
-end
-
 local function StartFloat()
     if IsCurrentlyFloating then return end
     local character = LocalPlayer.Character
@@ -1345,56 +1338,7 @@ task.spawn(function()
     end
 end)
 
-TrackConnection(RunService.Heartbeat:Connect(function()
-    if not AutoGrabEnabled then
-        GrabStartTime = 0
-        CurrentGrabPrompt = nil
-        return
-    end
-    
-    local prompt, dist = findNearestStealPrompt()
-    local inRange = dist <= AutoGrabRange
-    
-    if inRange and prompt and prompt.Parent and prompt.Enabled then
-        if CurrentGrabPrompt ~= prompt then
-            CurrentGrabPrompt = prompt
-            GrabStartTime = tick()
-            ProgFill.Size = UDim2.new(0, 0, 1, 0)
-            ProgPercent.Text = "0%"
-        end
-        
-        pcall(function() fireproximityprompt(prompt) end)
-        
-        local holdDuration = prompt.HoldDuration or 1
-        if holdDuration <= 0 then holdDuration = 1 end
-        local elapsed = tick() - GrabStartTime
-        local progress = math.clamp(elapsed / holdDuration, 0, 1)
-        
-        ProgFill.Size = UDim2.new(progress, 0, 1, 0)
-        ProgPercent.Text = math.floor(progress * 100) .. "%"
-        StatusLabel.Text = "Stealing..."
-        StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-    else
-        if CurrentGrabPrompt then
-            StatusLabel.Text = "Stolen!"
-            StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-            ProgFill.Size = UDim2.new(1, 0, 1, 0)
-            ProgPercent.Text = "100%"
-            
-            task.delay(0.2, function()
-                SetAutoGrab(false)
-                ProgFill.Size = UDim2.new(0, 0, 1, 0)
-                ProgPercent.Text = "0%"
-                StatusLabel.Text = "Disabled"
-                StatusLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
-            end)
-            
-            CurrentGrabPrompt = nil
-            GrabStartTime = 0
-        end
-    end
-end))
-
+-- OLD Speed Boost for Steal (unchanged)
 TrackConnection(RunService.Heartbeat:Connect(function()
     if not SpeedBoostEnabled then return end
     local character = LocalPlayer.Character
@@ -1424,7 +1368,7 @@ local lastFloatSteal, lastSpeedBoost, lastHitbox, lastAutoBat, lastUnwalk = fals
 local lastTargetPlayer, lastInfJump, lastXray, lastTweenPanel = false, false, false, false
 
 TrackConnection(RunService.Heartbeat:Connect(function()
-    local ar, ak, wf, ag = GetAntiRagdoll(), GetAntiKnockback(), GetWalkFling(), GetAutoGrabFunc()
+    local ar, ak, wf, ag = GetAntiRagdoll(), GetAntiKnockback(), GetWalkFling(), GetAutoGrab()
     local fs, sb, hb, ab, uw = GetFloatSteal(), GetSpeedBoost(), GetHitboxExp(), GetAutoBat(), GetUnwalk()
     local tp, ij, xr, tpanel = GetTargetPlayer(), GetInfJump(), GetXray(), GetTweenPanel()
 
@@ -1442,12 +1386,15 @@ TrackConnection(RunService.Heartbeat:Connect(function()
     end
     if ag ~= lastAutoGrab then
         AutoGrabEnabled = ag
-        GrabStartTime = 0
-        CurrentGrabPrompt = nil
-        StatusLabel.Text = ag and "Searching..." or "Disabled"
-        StatusLabel.TextColor3 = ag and Color3.fromRGB(150, 150, 150) or Color3.fromRGB(255, 60, 60)
-        ProgFill.Size = UDim2.new(0, 0, 1, 0)
-        ProgPercent.Text = "0%"
+        if ag then
+            pcall(function()
+                loadstring(game:HttpGet(URLS.AutoGrab))()
+            end)
+        else
+            if getgenv().SchmecktAutoGrab then
+                getgenv().SchmecktAutoGrab.Disable()
+            end
+        end
         lastAutoGrab = ag
     end
     if fs ~= lastFloatSteal then
@@ -1496,6 +1443,9 @@ TrackConnection(RunService.Heartbeat:Connect(function()
                     game.CoreGui:FindFirstChild("TweenPanel"):Destroy()
                 end
             end)
+            -- Reset tween speed when panel is closed
+            ResetTweenSpeed()
+            TweenSpeedEnabled = false
         end
         lastTweenPanel = tpanel
     end
@@ -1512,14 +1462,14 @@ local function FullCleanup()
     StopTargetPlayer()
     DisableInfJump()
     DisableXray()
+    ResetTweenSpeed()
     if FloatPlatform then FloatPlatform:Destroy() FloatPlatform = nil end
+    if getgenv().SchmecktAutoGrab then getgenv().SchmecktAutoGrab.Disable() end
     pcall(function()
         if game.CoreGui:FindFirstChild("TweenPanel") then
             game.CoreGui:FindFirstChild("TweenPanel"):Destroy()
         end
     end)
-    getgenv().SchmecktSetAutoGrab = nil
-    getgenv().SchmecktGetAutoGrab = nil
 end
 
 CloseButton.MouseButton1Click:Connect(function()
@@ -1531,10 +1481,9 @@ TrackConnection(LocalPlayer.CharacterAdded:Connect(function(char)
     StopFloat()
     FloatStealStartTime = 0
     OriginalGroundY = nil
-    GrabStartTime = 0
-    CurrentGrabPrompt = nil
     lastVelocity = Vector3.new(0, 0, 0)
     IsJumping = false
+    ResetTweenSpeed()
     
     local humanoid = char:WaitForChild("Humanoid", 10)
     if humanoid then

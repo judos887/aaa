@@ -92,7 +92,6 @@ local SpeedBoostEnabled = false
 local NormalSpeed = SavedSettings.NormalSpeed or 57
 local StealSpeed = SavedSettings.StealSpeed or 29.5
 
--- Tween Speed Boost Variables (NEW SYSTEM)
 local TweenSpeedEnabled = false
 local TweenTargetSpeed = 61
 local TweenLerpAlpha = 0.35
@@ -129,7 +128,6 @@ local SetWalkFling, SetTweenPanel, SetUnwalk, SetTargetPlayer, SetInfJump, SetXr
 local GetWalkFling, GetTweenPanel, GetFloatSteal, GetSpeedBoost, GetHitboxExp, GetAutoBat, GetAntiRagdoll, GetAntiKnockback, GetUnwalk, GetTargetPlayer, GetInfJump, GetXray, GetAutoGrab
 local ScreenGui, SpeedFrame, SpeedStatusLabel
 
--- Tween Speed Boost Functions (from first script)
 local function IsGroundedTween(hrp)
     local rayParams = RaycastParams.new()
     rayParams.FilterDescendantsInstances = {LocalPlayer.Character}
@@ -140,11 +138,9 @@ end
 local function DetectCorrectionTween(hrp)
     local now = tick()
     local currentPos = hrp.Position
-    
     if TweenLastPosition and (now - TweenLastTime) > 0 then
         local expected = (now - TweenLastTime) * TweenTargetSpeed * TweenCurrentMultiplier
         local actual = (Vector3.new(currentPos.X, 0, currentPos.Z) - Vector3.new(TweenLastPosition.X, 0, TweenLastPosition.Z)).Magnitude
-        
         if expected > 2 and actual < expected * 0.5 then
             TweenCorrectionCount = TweenCorrectionCount + 1
             TweenLastPosition = currentPos
@@ -152,7 +148,6 @@ local function DetectCorrectionTween(hrp)
             return true
         end
     end
-    
     TweenLastPosition = currentPos
     TweenLastTime = now
     return false
@@ -163,27 +158,22 @@ local function ApplyTweenSpeed(hrp, moveDir)
         TweenCurrentMultiplier = 0.3
         return 0
     end
-    
     local corrected = DetectCorrectionTween(hrp)
-    
     if corrected then
         TweenCurrentMultiplier = 0.5
     else
         TweenCurrentMultiplier = math.min(1, TweenCurrentMultiplier + TweenRampSpeed)
         TweenCorrectionCount = math.max(0, TweenCorrectionCount - 0.05)
     end
-    
     local safeSpeed = TweenTargetSpeed
     if TweenCorrectionCount > 3 then
         safeSpeed = TweenTargetSpeed * 0.8
     elseif TweenCorrectionCount > 1 then
         safeSpeed = TweenTargetSpeed * 0.9
     end
-    
     local finalSpeed = safeSpeed * TweenCurrentMultiplier
     local grounded = IsGroundedTween(hrp)
     local alpha = grounded and TweenLerpAlpha or (TweenLerpAlpha * 0.5)
-    
     local currentVel = hrp.AssemblyLinearVelocity
     local targetVel = moveDir.Unit * finalSpeed
     local newVel = Vector3.new(
@@ -191,9 +181,7 @@ local function ApplyTweenSpeed(hrp, moveDir)
         currentVel.Y,
         currentVel.Z + (targetVel.Z - currentVel.Z) * alpha
     )
-    
     hrp.AssemblyLinearVelocity = newVel
-    
     return math.floor(Vector3.new(newVel.X, 0, newVel.Z).Magnitude)
 end
 
@@ -204,7 +192,6 @@ local function ResetTweenSpeed()
     TweenLastTime = 0
 end
 
--- Export for Tween Panel to use
 getgenv().SchmecktTweenSpeed = {
     Apply = ApplyTweenSpeed,
     Reset = ResetTweenSpeed,
@@ -410,7 +397,9 @@ local function EnableXray()
     if getgenv then getgenv().OPTIMIZER_ACTIVE = true end
     pcall(function()
         settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
-        Lighting.GlobalShadows = false; Lighting.Brightness = 3; Lighting.FogEnd = 9e9
+        Lighting.GlobalShadows = false
+        Lighting.Brightness = 3
+        Lighting.FogEnd = 9e9
     end)
     pcall(function()
         for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -437,7 +426,8 @@ local function DisableXray()
         for part, val in pairs(OriginalTransparency) do
             if part then part.LocalTransparencyModifier = val end
         end
-        OriginalTransparency = {}; XrayActive = false
+        OriginalTransparency = {}
+        XrayActive = false
     end
 end
 
@@ -676,7 +666,6 @@ end
 TrackConnection(UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-
     if ListeningForKeybind then
         local keyName = input.KeyCode.Name
         if input.KeyCode == Enum.KeyCode.Escape then
@@ -704,7 +693,6 @@ TrackConnection(UserInputService.InputBegan:Connect(function(input, gameProcesse
         ListeningForKeybind = nil
         return
     end
-
     for keybindKey, data in pairs(AllKeybinds) do
         local savedKey = SavedSettings[keybindKey]
         if savedKey and savedKey ~= "" then
@@ -858,7 +846,6 @@ local function StartWalkFling()
     local humanoid = character:FindFirstChild("Humanoid")
     if not root or not humanoid then return end
     WalkFlingRunning = true
-
     CollisionConnection = RunService.Stepped:Connect(function()
         for _, plr in ipairs(Players:GetPlayers()) do
             if plr ~= LocalPlayer and plr.Character then
@@ -868,7 +855,6 @@ local function StartWalkFling()
             end
         end
     end)
-
     FlingConnection = RunService.Heartbeat:Connect(function()
         character = LocalPlayer.Character
         root = character and character:FindFirstChild("HumanoidRootPart")
@@ -923,16 +909,13 @@ end
 local function EnableAntiRagdoll()
     if AntiRagdollActive then return end
     AntiRagdollActive = true
-    
     local character = LocalPlayer.Character
     if not character then
         character = LocalPlayer.CharacterAdded:Wait()
     end
     local humanoid = character:WaitForChild("Humanoid", 10)
     if not humanoid then return end
-    
     enableControls()
-    
     local stateConn = humanoid.StateChanged:Connect(function()
         if not AntiRagdollActive then return end
         if shouldBlockState() then
@@ -943,29 +926,23 @@ local function EnableAntiRagdoll()
         end
     end)
     table.insert(AntiRagdollConnections, stateConn)
-    
     local steppedConn = RunService.Stepped:Connect(function()
         if not AntiRagdollActive then return end
-        
         character = LocalPlayer.Character
         if not character then return end
-        
         humanoid = character:FindFirstChildOfClass("Humanoid")
         if not humanoid then return end
-        
         if shouldBlockState() then
             pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Running) end)
             cleanChar()
         end
     end)
     table.insert(AntiRagdollConnections, steppedConn)
-    
     local descConn = character.DescendantAdded:Connect(function()
         if not AntiRagdollActive then return end
         if shouldBlockState() then cleanChar() end
     end)
     table.insert(AntiRagdollConnections, descConn)
-    
     pcall(function()
         local pkg = ReplicatedStorage:FindFirstChild("Packages")
         if pkg then
@@ -986,26 +963,22 @@ local function EnableAntiRagdoll()
             end
         end
     end)
-    
     local charAddedConn = LocalPlayer.CharacterAdded:Connect(function(newChar)
         task.wait(0.5)
         character = newChar
         humanoid = newChar:WaitForChild("Humanoid", 10)
         if not humanoid then return end
-        
         task.wait(0.1)
         enableControls()
         cleanChar()
     end)
     table.insert(AntiRagdollConnections, charAddedConn)
-    
     enableControls()
     cleanChar()
 end
 
 local function DisableAntiRagdoll()
     AntiRagdollActive = false
-    
     for _, conn in pairs(AntiRagdollConnections) do
         pcall(function() conn:Disconnect() end)
     end
@@ -1031,9 +1004,7 @@ end
 local function EnableAntiKnockback()
     if AntiKnockbackActive then return end
     AntiKnockbackActive = true
-    
     SetupJumpTracking()
-    
     pcall(function()
         local pkg = ReplicatedStorage:FindFirstChild("Packages")
         if pkg then
@@ -1058,65 +1029,47 @@ local function EnableAntiKnockback()
             end
         end
     end)
-    
     AntiKnockbackConnection = RunService.Heartbeat:Connect(function()
         if not AntiKnockbackActive then return end
-        
         local character = LocalPlayer.Character
         if not character then return end
-        
         local hrp = character:FindFirstChild("HumanoidRootPart")
         local humanoid = character:FindFirstChild("Humanoid")
         if not hrp or not humanoid then return end
-        
         local state = humanoid:GetState()
         local currentVel = hrp.AssemblyLinearVelocity
-        
         if state == Enum.HumanoidStateType.Jumping then
             IsJumping = true
             lastVelocity = currentVel
             return
         end
-        
         if state == Enum.HumanoidStateType.Landed or state == Enum.HumanoidStateType.Running then
             IsJumping = false
         end
-        
-        if getgenv().TweenPanelRunning then
-            lastVelocity = currentVel
-            return
-        end
-        
         if shouldBlockState() then
             cleanChar()
-            
             local clampedX = math.clamp(currentVel.X, -MaxHorizontalSpeed, MaxHorizontalSpeed)
             local clampedY = math.clamp(currentVel.Y, -MaxVerticalKnockback, MaxVerticalKnockback)
             local clampedZ = math.clamp(currentVel.Z, -MaxHorizontalSpeed, MaxHorizontalSpeed)
             hrp.AssemblyLinearVelocity = Vector3.new(clampedX, clampedY, clampedZ)
-            
             pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Running) end)
             lastVelocity = hrp.AssemblyLinearVelocity
             return
         end
-        
         local newVel = currentVel
         local needsChange = false
-        
         local horizontalVel = Vector3.new(currentVel.X, 0, currentVel.Z)
         if horizontalVel.Magnitude > MaxHorizontalSpeed then
             local dir = horizontalVel.Unit
             newVel = Vector3.new(dir.X * MaxHorizontalSpeed, newVel.Y, dir.Z * MaxHorizontalSpeed)
             needsChange = true
         end
-        
         if not IsJumping and state ~= Enum.HumanoidStateType.Freefall then
             if currentVel.Y > MaxVerticalKnockback then
                 newVel = Vector3.new(newVel.X, MaxVerticalKnockback, newVel.Z)
                 needsChange = true
             end
         end
-        
         if state == Enum.HumanoidStateType.Freefall and not IsJumping then
             local yChange = currentVel.Y - lastVelocity.Y
             if yChange > 40 then
@@ -1124,11 +1077,9 @@ local function EnableAntiKnockback()
                 needsChange = true
             end
         end
-        
         if needsChange then
             hrp.AssemblyLinearVelocity = newVel
         end
-        
         lastVelocity = hrp.AssemblyLinearVelocity
     end)
 end
@@ -1155,10 +1106,8 @@ local function StartFloat()
     if not character then return end
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
-    
     IsCurrentlyFloating = true
     OriginalGroundY = GetRealGroundY(hrp)
-    
     if FloatPlatform then FloatPlatform:Destroy() end
     FloatPlatform = Instance.new("Part")
     FloatPlatform.Size = Vector3.new(4, 0.5, 4)
@@ -1168,23 +1117,18 @@ local function StartFloat()
     FloatPlatform.Name = "FloatPlatform"
     FloatPlatform.Parent = Workspace
     FloatPlatform.Position = Vector3.new(hrp.Position.X, hrp.Position.Y - 3, hrp.Position.Z)
-    
     FloatConnection = RunService.Heartbeat:Connect(function(dt)
         if not IsCurrentlyFloating then return end
         if not FloatPlatform or not FloatPlatform.Parent then return end
-        
         local character = LocalPlayer.Character
         if not character then return end
         local hrp = character:FindFirstChild("HumanoidRootPart")
         if not hrp then return end
-        
         local targetHeight = GetCurrentFloatHeight(hrp)
         local targetPlatformY = OriginalGroundY + targetHeight - 3
         local currentY = FloatPlatform.Position.Y
         local diff = targetPlatformY - currentY
-        
         local moveSpeed = 40
-        
         local newY
         if math.abs(diff) < 0.1 then
             newY = targetPlatformY
@@ -1192,7 +1136,6 @@ local function StartFloat()
             local step = math.sign(diff) * math.min(math.abs(diff), dt * moveSpeed)
             newY = currentY + step
         end
-        
         FloatPlatform.Position = Vector3.new(hrp.Position.X, newY, hrp.Position.Z)
     end)
 end
@@ -1299,25 +1242,20 @@ task.spawn(function()
             FloatStealStartTime = 0
             continue
         end
-        
         local character = LocalPlayer.Character
         if not character then continue end
         local humanoid = character:FindFirstChild("Humanoid")
         local hrp = character:FindFirstChild("HumanoidRootPart")
         if not humanoid or not hrp then continue end
-        
         local isStealing = humanoid.WalkSpeed <= 25
         local playerNearby = GetNearestPlayerDistance(hrp) <= SmartFloatRange
-        
         if isStealing and FloatStealStartTime == 0 then
             FloatStealStartTime = tick()
         elseif not isStealing then
             FloatStealStartTime = 0
         end
-        
         local delayPassed = FloatStealStartTime > 0 and (tick() - FloatStealStartTime) >= FloatStartDelay
         local shouldFloat = isStealing and playerNearby and delayPassed
-        
         if shouldFloat then
             if IsCurrentlyFloating and FloatPlatform and FloatPlatform.Parent then
                 local platformY = FloatPlatform.Position.Y
@@ -1338,7 +1276,6 @@ task.spawn(function()
     end
 end)
 
--- OLD Speed Boost for Steal (unchanged)
 TrackConnection(RunService.Heartbeat:Connect(function()
     if not SpeedBoostEnabled then return end
     local character = LocalPlayer.Character
@@ -1371,7 +1308,6 @@ TrackConnection(RunService.Heartbeat:Connect(function()
     local ar, ak, wf, ag = GetAntiRagdoll(), GetAntiKnockback(), GetWalkFling(), GetAutoGrab()
     local fs, sb, hb, ab, uw = GetFloatSteal(), GetSpeedBoost(), GetHitboxExp(), GetAutoBat(), GetUnwalk()
     local tp, ij, xr, tpanel = GetTargetPlayer(), GetInfJump(), GetXray(), GetTweenPanel()
-
     if ar ~= lastAntiRagdoll then
         if ar then EnableAntiRagdoll() else DisableAntiRagdoll() end
         lastAntiRagdoll = ar
@@ -1443,7 +1379,6 @@ TrackConnection(RunService.Heartbeat:Connect(function()
                     game.CoreGui:FindFirstChild("TweenPanel"):Destroy()
                 end
             end)
-            -- Reset tween speed when panel is closed
             ResetTweenSpeed()
             TweenSpeedEnabled = false
         end
@@ -1484,7 +1419,6 @@ TrackConnection(LocalPlayer.CharacterAdded:Connect(function(char)
     lastVelocity = Vector3.new(0, 0, 0)
     IsJumping = false
     ResetTweenSpeed()
-    
     local humanoid = char:WaitForChild("Humanoid", 10)
     if humanoid then
         humanoid.StateChanged:Connect(function(old, new)
@@ -1495,7 +1429,6 @@ TrackConnection(LocalPlayer.CharacterAdded:Connect(function(char)
             end
         end)
     end
-    
     if UnwalkEnabled then
         task.wait(0.5)
         DisableAnimations()
